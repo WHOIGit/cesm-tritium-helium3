@@ -77,7 +77,8 @@
 
    use tr3he_mod, only:              &
        tr3he_tracer_cnt,             &
-       tr3he_init!,                   &
+       tr3he_init,                   &
+       tr3he_set_interior
 !       tr3he_set_sflux,              &
 !       tr3he_tavg_forcing
 
@@ -675,6 +676,18 @@
          TRACER(:,:,:,ecosys_ind_begin:ecosys_ind_end,oldtime,bid),&
          TRACER(:,:,:,ecosys_ind_begin:ecosys_ind_end,curtime,bid),&
          TRACER_SOURCE(:,:,ecosys_ind_begin:ecosys_ind_end),       &
+         this_block)
+   end if
+
+!-----------------------------------------------------------------------
+!  tritium-helium 3 block
+!-----------------------------------------------------------------------
+
+   if (tr3he_on) then
+      call tr3he_set_interior(k,                                  &
+         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,oldtime,bid),&
+         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,curtime,bid),&
+         TRACER_SOURCE(:,:,tr3he_ind_begin:tr3he_ind_end),       &
          this_block)
    end if
 

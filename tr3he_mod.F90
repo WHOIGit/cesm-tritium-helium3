@@ -8,7 +8,7 @@ module tr3he_mod
 !  Module for tritium (3H) and helium 3 (3He) 
 !
 !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-!  Last modified on Thu Apr 14 2016 14:15:12 -0400
+!  Last modified on Wed May 11 2016 17:20:01 -0400
 !
 ! !DESCRIPTION:
 !
@@ -26,7 +26,7 @@ module tr3he_mod
    use domain, only: nblocks_clinic, distrb_clinic
    use exit_mod, only: sigAbort, exit_POP
    use communicate, only: my_task, master_task
-   use constants, only: c0, c1, T0_Kelvin
+   use constants
    use io_types, only: stdout
    use io_tools, only: document
    use tavg, only: define_tavg_field, accumulate_tavg_field
@@ -49,7 +49,8 @@ module tr3he_mod
 
    public :: &
        tr3he_tracer_cnt, &
-       tr3he_init!, &
+       tr3he_init, &
+       tr3he_set_interior
 !       tr3he_set_sflux,  &
 !       tr3he_tavg_forcing
 
@@ -121,6 +122,13 @@ module tr3he_mod
       tavg_HELIUM3_SCHMIDT,    & ! tavg id for 3He Schmidt number
       tavg_HELIUM3_PV,         & ! tavg id for 3He piston velocity
       tavg_HELIUM3_surf_sat      ! tavg id for 3He surface saturation
+
+!-----------------------------------------------------------------------
+!  define tavg id for nonstandard 3d fields
+!-----------------------------------------------------------------------
+
+   integer (int_kind) :: &
+      tavg_TRITIUM_DECAY        ! tavg id for tritium decay
 
 !-----------------------------------------------------------------------
 !  timers
@@ -473,6 +481,8 @@ contains
       var_cnt             ! how many tavg variables are defined
 
 !-----------------------------------------------------------------------
+!  2D fields related to surface fluxes
+!-----------------------------------------------------------------------
 
    var_cnt = 0
 
@@ -510,6 +520,15 @@ contains
 
    allocate(tr3he_SFLUX_TAVG(nx_block,ny_block,var_cnt,max_blocks_clinic))
    tr3he_SFLUX_TAVG = c0
+
+!-----------------------------------------------------------------------
+!  nonstandard 3D fields
+!-----------------------------------------------------------------------
+
+   call define_tavg_field(tavg_TRITIUM_DECAY,'TRITIUM_DECAY',3,        &
+                          long_name='tritium decay',                   &
+                          units='TU/s', grid_loc='3111',               &
+                          coordinates='TLONG TLAT z_t time')
 
 !-----------------------------------------------------------------------
 !EOC
@@ -572,6 +591,97 @@ contains
 !EOC
 
  end subroutine tr3he_init_sflux
+
+!***********************************************************************
+!BOP
+! !IROUTINE: tr3he_set_interior
+! !INTERFACE:
+
+ subroutine tr3he_set_interior(k, TRACER_MODULE_OLD, TRACER_MODULE_CUR, &
+         DTRACER_MODULE, this_block)
+
+! !DESCRIPTION:
+!  Compute time derivatives for tritium and helium 3
+!
+! !REVISION HISTORY:
+!  same as module
+
+! !INPUT PARAMETERS:
+
+   integer(int_kind), intent(in) :: &
+      k                    ! vertical level index
+
+   real (r8), dimension(nx_block,ny_block,km,tr3he_tracer_cnt), intent(in) :: &
+      TRACER_MODULE_OLD, & ! old tracer values
+      TRACER_MODULE_CUR    ! current tracer values
+
+   type (block), intent(in) :: &
+      this_block          ! block info for the current block
+
+! !OUTPUT PARAMETERS:
+
+   real(r8), dimension(nx_block,ny_block,tr3he_tracer_cnt), intent(out) :: &
+      DTRACER_MODULE       ! computed source/sink term
+
+!EOP
+!BOC
+!-----------------------------------------------------------------------
+!  local variables
+!-----------------------------------------------------------------------
+
+   character(*), parameter :: &
+      subname = 'tr3he_mod:tr3he_set_interior'
+
+   real (r8), parameter ::          &
+      spd    = 86400.0_r8,          & ! number of seconds in a day
+      spy    = 365.0_r8*spd,        & ! number of seconds in a year
+      hlife  = 12.31_r8,            & ! tritium half-life in years
+      lambda = -log(p5)/(hlife*spy)   ! tritium decay constant (1/sec)
+
+   real (r8), dimension(nx_block,ny_block) :: &
+      tritium_loc,  & ! local copy of model tritium
+      helium3_loc,  & ! local copy of model helium 3
+      TRITIUM_DECAY   ! tritium decay term
+
+   integer (int_kind) :: &
+      bid             ! local_block id
+
+!-----------------------------------------------------------------------
+
+   bid = this_block%local_id
+
+   DTRACER_MODULE = c0
+
+!-----------------------------------------------------------------------
+!  create local copies of model tracers
+!  treat negative values as zero
+!-----------------------------------------------------------------------
+
+   tritium_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,tritium_ind) + &
+                              TRACER_MODULE_CUR(:,:,k,tritium_ind)))
+!   helium3_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,helium3_ind) + &
+!                              TRACER_MODULE_CUR(:,:,k,helium3_ind)))
+
+!-----------------------------------------------------------------------
+!  apply mask to local copies ???
+!  TODO: define LAND_MASK as in ecosys module and define block_id stuff
+!  NOTE: LAND_MASK is TRUE at ocean points
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+!  compute time derivatives
+!-----------------------------------------------------------------------
+
+    TRITIUM_DECAY = lambda * tritium_loc
+    DTRACER_MODULE(:,:,tritium_ind) = -TRITIUM_DECAY
+    DTRACER_MODULE(:,:,helium3_ind) = TRITIUM_DECAY
+
+    call accumulate_tavg_field(TRITIUM_DECAY, tavg_TRITIUM_DECAY,bid,k)
+
+!-----------------------------------------------------------------------
+!EOC
+
+ end subroutine tr3he_set_interior
 
 !***********************************************************************
 
