@@ -5970,7 +5970,7 @@ group="tr3he_nml"
 input_pathname="abs" >
 Filename for initializing tr3he (if init_tr3he_option='file').
 
-Default: 'tritium_3He_init_test.nc'
+Default: 'tritium_3He_init_sat.nc'
 </entry>
 
 <entry 
@@ -6073,7 +6073,7 @@ group="tr3he_nml"
 valid_values="ocmip,model" >
 Flux formulation.
 
-Valid Values: 'model'
+Valid Values: 'model', 'file'
 Default: 'model'
 </entry>
 

@@ -25,7 +25,7 @@
    use domain, only: nblocks_clinic
    use communicate, only: my_task, master_task
    use broadcast, only: broadcast_scalar
-   use prognostic, only: TRACER, PSURF, tracer_d, oldtime, curtime, newtime
+   use prognostic, only: TRACER, PSURF, RHO, tracer_d, oldtime, curtime, newtime
    use forcing_shf, only: SHF_QSW_RAW, SHF_QSW
    use io_types, only: stdout, nml_in, nml_filename, io_field_desc, &
        datafile
@@ -75,12 +75,12 @@
        moby_write_restart,         &
        POP_mobySendTime
 
-   use tr3he_mod, only:              &
-       tr3he_tracer_cnt,             &
-       tr3he_init,                   &
-       tr3he_set_interior
-!       tr3he_set_sflux,              &
-!       tr3he_tavg_forcing
+   use tr3he_mod, only:            &
+       tr3he_tracer_cnt,           &
+       tr3he_init,                 &
+       tr3he_set_interior,         &
+       tr3he_set_sflux,            &
+       tr3he_tavg_forcing
 
    implicit none
    private
@@ -88,20 +88,20 @@
 
 ! !PUBLIC MEMBER FUNCTIONS:
 
-   public ::                                 &
-      init_passive_tracers,                  &
-      set_interior_passive_tracers,          &
-      set_interior_passive_tracers_3D,       &
-      set_sflux_passive_tracers,             &
-      reset_passive_tracers,                 &
-      write_restart_passive_tracers,         &
-      tavg_passive_tracers,                  &
-      tavg_passive_tracers_baroclinic_correct,&
-      passive_tracers_tavg_sflux,            &
-      passive_tracers_tavg_fvice,            &
-      passive_tracers_send_time,             &
-      tracer_ref_val,                        &
-      tadvect_ctype_passive_tracers,         &
+   public ::                                   &
+      init_passive_tracers,                    &
+      set_interior_passive_tracers,            &
+      set_interior_passive_tracers_3D,         &
+      set_sflux_passive_tracers,               &
+      reset_passive_tracers,                   &
+      write_restart_passive_tracers,           &
+      tavg_passive_tracers,                    &
+      tavg_passive_tracers_baroclinic_correct, &
+      passive_tracers_tavg_sflux,              &
+      passive_tracers_tavg_fvice,              &
+      passive_tracers_send_time,               &
+      tracer_ref_val,                          &
+      tadvect_ctype_passive_tracers,           &
       ecosys_on, moby_on
 
 !EOP
@@ -167,11 +167,13 @@
 !  filtered SST and SSS, if needed
 !-----------------------------------------------------------------------
 
-   logical (kind=log_kind) :: filtered_SST_SSS_needed
+   logical (kind=log_kind) :: &
+       filtered_SST_SSS_needed, filtered_RHO_needed
 
    real (r8), dimension(:,:,:), allocatable :: &
       SST_FILT,      & ! SST with time filter applied, [degC]
-      SSS_FILT         ! SSS with time filter applied, [psu]
+      SSS_FILT,      & ! SSS with time filter applied, [psu]
+      RHO_FILT         ! density [kg/m^3]
 
 !EOC
 !***********************************************************************
@@ -412,7 +414,7 @@
    end if
 
 !-----------------------------------------------------------------------
-!  Tritium-3He block
+!  tritium-helium 3 block
 !-----------------------------------------------------------------------
 
    if (tr3he_on) then
@@ -605,11 +607,16 @@
 !  allocate space for filtered SST and SSS, if needed
 !-----------------------------------------------------------------------
 
-   filtered_SST_SSS_needed = ecosys_on .or. cfc_on
+   filtered_SST_SSS_needed = ecosys_on .or. cfc_on .or. tr3he_on
+   filtered_RHO_needed     = tr3he_on
 
    if (filtered_SST_SSS_needed) then
       allocate(SST_FILT(nx_block,ny_block,max_blocks_clinic), &
                SSS_FILT(nx_block,ny_block,max_blocks_clinic))
+   endif
+
+   if (filtered_RHO_needed) then
+      allocate(RHO_FILT(nx_block,ny_block,max_blocks_clinic))
    endif
 
  1010 format(5X,I2,10X,A)
@@ -680,18 +687,6 @@
    end if
 
 !-----------------------------------------------------------------------
-!  tritium-helium 3 block
-!-----------------------------------------------------------------------
-
-   if (tr3he_on) then
-      call tr3he_set_interior(k,                                  &
-         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,oldtime,bid),&
-         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,curtime,bid),&
-         TRACER_SOURCE(:,:,tr3he_ind_begin:tr3he_ind_end),       &
-         this_block)
-   end if
-
-!-----------------------------------------------------------------------
 !  CFC does not have source-sink terms
 !-----------------------------------------------------------------------
 
@@ -712,6 +707,18 @@
       call moby_set_interior (k, TRACER_SOURCE(:,:,moby_ind_begin:moby_ind_end), &
            this_block)
    endif
+
+!-----------------------------------------------------------------------
+!  tritium-helium 3 block
+!-----------------------------------------------------------------------
+
+   if (tr3he_on) then
+      call tr3he_set_interior(k,                                  &
+         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,oldtime,bid),&
+         TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,curtime,bid),&
+         TRACER_SOURCE(:,:,tr3he_ind_begin:tr3he_ind_end),       &
+         this_block)
+   end if
 
 !-----------------------------------------------------------------------
 !  accumulate time average if necessary
@@ -878,6 +885,19 @@
    end if
 
 !-----------------------------------------------------------------------
+!  compute filtered RHO, if needed
+!-----------------------------------------------------------------------
+
+   if (filtered_RHO_needed) then
+      !$OMP PARALLEL DO PRIVATE(iblock)
+      do iblock = 1,nblocks_clinic
+         RHO_FILT(:,:,iblock) = p5*(RHO(:,:,1,oldtime,iblock) + &
+                                    RHO(:,:,1,curtime,iblock)) * 1000.0_r8             
+      end do
+      !$OMP END PARALLEL DO
+   end if
+
+!-----------------------------------------------------------------------
 !  ECOSYS block
 !-----------------------------------------------------------------------
 
@@ -918,6 +938,18 @@
          TRACER(:,:,1,moby_ind_begin:moby_ind_end,oldtime,:),  &
          TRACER(:,:,1,moby_ind_begin:moby_ind_end,curtime,:),  &
          STF(:,:,moby_ind_begin:moby_ind_end,:))
+   end if
+
+!-----------------------------------------------------------------------
+!  tritium-helium 3 block
+!-----------------------------------------------------------------------
+
+   if (tr3he_on) then
+      call tr3he_set_sflux(U10_SQR, ICE_FRAC, PRESS,               &
+         SST_FILT, SSS_FILT, RHO_FILT,                             &
+         TRACER(:,:,1,tr3he_ind_begin:tr3he_ind_end,oldtime,:),    &
+         TRACER(:,:,1,tr3he_ind_begin:tr3he_ind_end,curtime,:),    &
+         STF(:,:,tr3he_ind_begin:tr3he_ind_end,:))
    end if
 
 !-----------------------------------------------------------------------
@@ -1281,6 +1313,14 @@
    if (moby_on) then
      call moby_tavg_forcing(STF(:,:,moby_ind_begin:moby_ind_end,:))
    endif
+
+!-----------------------------------------------------------------------
+!  tritium-helium 3 block
+!-----------------------------------------------------------------------
+
+   if (tr3he_on) then
+      call tr3he_tavg_forcing
+   end if
 
 !-----------------------------------------------------------------------
 !EOC

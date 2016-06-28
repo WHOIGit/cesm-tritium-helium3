@@ -20,6 +20,8 @@ cat >! $CASEROOT/Buildconf/pop2conf/tr3he_tavg_contents << EOF
 $s1  HELIUM3_IFRAC
 $s1  HELIUM3_XKW
 $s1  HELIUM3_ATM_PRESS
+$s1  HELIUM3_SURF_SAT
+$s1  HELIUM3_FG
 $s1  HELIUM3
 $s1  TRITIUM
 $s1  TRITIUM_DECAY
