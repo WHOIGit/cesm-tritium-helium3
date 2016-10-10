@@ -5955,10 +5955,10 @@ id="init_tr3he_option"
 type="char*256"
 category="passive_tracers"
 group="tr3he_nml"
-valid_values="ccsm_startup,one,ccsm_startup_spunup,restart,ccsm_continue,ccsm_branch,ccsm_hybrid,file" >
+valid_values="ccsm_startup,one,ccsm_startup_spunup,restart,ccsm_continue,ccsm_branch,ccsm_hybrid,file,saturation" >
 Option for initialization of tr3he.
 
-Valid Values: 'ccsm_startup', 'one', 'ccsm_startup_spunup', 'restart', 'ccsm_continue', 'ccsm_branch', 'ccsm_hybrid', 'file'
+Valid Values: 'ccsm_startup', 'one', 'ccsm_startup_spunup', 'restart', 'ccsm_continue', 'ccsm_branch', 'ccsm_hybrid', 'file', 'saturation'
 Default: 'ccsm_RUNTYPE'
 </entry>
 
@@ -5970,7 +5970,7 @@ group="tr3he_nml"
 input_pathname="abs" >
 Filename for initializing tr3he (if init_tr3he_option='file').
 
-Default: 'tritium_3He_init_sat.nc'
+Default: 'tritium_3He_init_balanced.nc'
 </entry>
 
 <entry 

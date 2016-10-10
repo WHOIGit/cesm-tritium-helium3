@@ -8,7 +8,7 @@ module tr3he_mod
 !  Module for tritium (3H) and helium 3 (3He) 
 !
 !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-!  Last modified on Tue Jul  5 2016 17:06:22 -0400
+!  Last modified on Tue Aug  9 2016 14:10:50 -0400
 !
 ! !DESCRIPTION:
 !
@@ -75,15 +75,17 @@ module tr3he_mod
 !-----------------------------------------------------------------------
 
    integer (int_kind), parameter :: &
-      tritium_ind =  1,  & ! tritium
-      helium3_ind =  2     ! helium 3
+      tr_ind  =  1,  & ! tritium
+      he3_ind =  2     ! helium 3
 
 !-----------------------------------------------------------------------
 !  gas flux parameters
 !-----------------------------------------------------------------------
 
    real (r8), parameter ::  &
-      R = 8.314425_r8     ! ideal gas constant in (m^3 Pa)/(K mol)
+      Xhe = 5.24e-6_r8,     & ! atmospheric helium 4 mole fraction (mol/mol)
+      Ir  = 1.384e-6_r8,    & ! 3He/4He isotopic ratio
+      R   = 8.314425_r8       ! ideal gas constant in (m^3 Pa)/(K mol)
 
 !-----------------------------------------------------------------------
 !  derived type & parameter for tracer index lookup
@@ -91,8 +93,8 @@ module tr3he_mod
 
    type(ind_name_pair), dimension(tr3he_tracer_cnt) :: &
       ind_name_table = (/ &
-      ind_name_pair(tritium_ind, 'TRITIUM'), &
-      ind_name_pair(helium3_ind, 'HELIUM3') /)
+      ind_name_pair(tr_ind,  'TRITIUM'), &
+      ind_name_pair(he3_ind, 'HELIUM3') /)
 
 !-----------------------------------------------------------------------
 !  mask that eases avoidance of computation over land
@@ -164,6 +166,7 @@ contains
 ! !INTERFACE:
 
  subroutine tr3he_init(init_ts_file_fmt, read_restart_filename, &
+                     TEMP3D, SALT3D, RHO3D,                 &
                      tracer_d_module, TRACER_MODULE, errorCode)
 
 ! !DESCRIPTION:
@@ -189,6 +192,9 @@ contains
    character (*), intent(in) ::  &
       init_ts_file_fmt,    & ! format (bin or nc) for input file
       read_restart_filename  ! file name for restart file
+
+   real (r8), dimension(nx_block,ny_block,km,max_blocks_clinic), &
+     intent(in) :: TEMP3D, SALT3D, RHO3D
 
 ! !INPUT/OUTPUT PARAMETERS:
 
@@ -238,6 +244,17 @@ contains
    character (char_len) ::  &
       tr3he_restart_filename      ! modified file name for restart file
 
+   real (r8), dimension(nx_block,ny_block) :: &
+       GAS_SOL_0,   & ! solubility of helium 4 (pmol/m^3/Pa)
+       ALPHA_SOL,   & ! temperature-dependent solubility fractionation
+       He4_SAT,     & ! helium 4 saturation
+       He3_SAT        ! helium 3 saturation
+
+   logical (log_kind), dimension(nx_block,ny_block) ::  LAND_MASK_k
+
+   real (r8), parameter :: &
+       Patm = 101325.0_r8      ! 1 atm in Pa
+
 !-----------------------------------------------------------------------
 !  initialize forcing_monthly_every_ts variables
 !-----------------------------------------------------------------------
@@ -252,8 +269,8 @@ contains
 !  initialize tracer_d values
 !-----------------------------------------------------------------------
 
-   tracer_d_module(tritium_ind)%long_name  = 'tritium'
-   tracer_d_module(helium3_ind)%long_name  = 'helium 3'
+   tracer_d_module(tr_ind)%long_name   = 'tritium'
+   tracer_d_module(he3_ind)%long_name  = 'helium 3'
    do n = 1, tr3he_tracer_cnt
       tracer_d_module(n)%short_name = ind_name_table(n)%name
       tracer_d_module(n)%units      = 'pmol/m^3'
@@ -405,7 +422,7 @@ contains
                                   tracer_d_module,        &
                                   TRACER_MODULE)
 
-   case ('file', 'ccsm_startup')
+   case ('file', 'ccsm_startup') 
 
       call document(sub_name, 'tritium and 3He being read from separate file')
 
@@ -429,6 +446,37 @@ contains
                endif
             end do
          end do
+      endif
+
+   case ('saturation')
+
+      if (my_task == master_task) then
+          write(stdout,delim_fmt)
+          write(stdout,*) ' Initial 3-d 3He set to saturation concentration'
+          write(stdout,delim_fmt)
+      endif
+
+      do iblock = 1, nblocks_clinic
+         do k = 1, km
+             LAND_MASK_k = merge(.true., .false., k <= KMT(:,:,iblock))
+             ! tritium
+             TRACER_MODULE(:,:,k,tr_ind,oldtime,iblock) = c0
+             TRACER_MODULE(:,:,k,tr_ind,curtime,iblock) = c0
+             ! helium 3
+             GAS_SOL_0 = he4_henry_sol_0(LAND_MASK_k, TEMP3D(:,:,k,iblock),    &
+                 SALT3D(:,:,k,iblock))
+             ALPHA_SOL = alpha_sol_he(LAND_MASK_k, TEMP3D(:,:,k,iblock))
+             He4_SAT = GAS_SOL_0 * Xhe * Patm   * 1.e+6_r8 ! mol/m^3 -> mumol/m^3
+             He3_SAT = He4_SAT * Ir * ALPHA_SOL * 1.e+6_r8 ! mumol/m^3 -> pmol/m^3
+             TRACER_MODULE(:,:,k,he3_ind,oldtime,iblock) = He3_SAT
+             TRACER_MODULE(:,:,k,he3_ind,curtime,iblock) = He3_SAT
+         end do
+      end do
+
+      if (my_task == master_task) then
+          write(stdout,delim_fmt)
+          write(stdout,*) ' Initialization of 3-d 3He complete'
+          write(stdout,delim_fmt)
       endif
 
    case default
@@ -829,8 +877,6 @@ contains
    real (r8), parameter ::         &
       !xkw_coeff  = 8.6e-7_r8,      & ! xkw_coeff = 0.31 cm/hr s^2/m^2 in (s/m)
       xkw_coeff  = 6.02e-7_r8,     & ! 0.7 * 8.6e-7 from Stanley et. al 2015  (s/m)
-      Xhe        = 5.24e-6_r8,     & ! atmospheric helium 4 mole fraction (mol/mol)
-      Ir         = 1.384e-6_r8,    & ! 3He/4He isotopic ratio
       alpha_diff = 1.0496_r8,      & ! 3He/4He diffusivity ratio (Bourg & Sposito 2008)
       MH2O       = 18.01528e-3_r8, & ! molecular weight of water in kg
       g          = 9.806_r8          ! gravitational acceleration in m/s^2
@@ -976,8 +1022,8 @@ contains
          He3_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
          He3_SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * He3_PPATM ! mol/m^3
          PV = XKW_ICE * sqrt(660.0_r8 / He3_SCHMIDT)
-         SURF_VALS = p5*(SURF_VALS_OLD(:,:,helium3_ind,iblock) +               &
-                         SURF_VALS_CUR(:,:,helium3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
+         SURF_VALS = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +               &
+                         SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
          FLUX_DGE = PV * (He3_SURF_SAT - SURF_VALS) * 1.e+12_r8 ! mol -> pmol
 
 !-----------------------------------------------------------------------
@@ -1005,7 +1051,7 @@ contains
 !-----------------------------------------------------------------------
 
          FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
-         STF_MODULE(:,:,helium3_ind,iblock) = FLUX
+         STF_MODULE(:,:,he3_ind,iblock) = FLUX
 
 !-----------------------------------------------------------------------
 
@@ -1016,7 +1062,7 @@ contains
          tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock) = FLUX_PTB
          tr3he_SFLUX_TAVG(:,:,buf_ind_3He_GAS_FLUX,iblock)    = FLUX
       elsewhere
-         STF_MODULE(:,:,helium3_ind,iblock) = c0
+         STF_MODULE(:,:,he3_ind,iblock) = c0
       endwhere
 
    end do
@@ -1097,10 +1143,10 @@ contains
 !  treat negative values as zero
 !-----------------------------------------------------------------------
 
-   tritium_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,tritium_ind) + &
-                              TRACER_MODULE_CUR(:,:,k,tritium_ind)))
-!   helium3_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,helium3_ind) + &
-!                              TRACER_MODULE_CUR(:,:,k,helium3_ind)))
+   tritium_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,tr_ind) + &
+                              TRACER_MODULE_CUR(:,:,k,tr_ind)))
+!   helium3_loc      = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,he3_ind) + &
+!                              TRACER_MODULE_CUR(:,:,k,he3_ind)))
 
 !-----------------------------------------------------------------------
 !  apply LAND_MASK to local copies 
@@ -1116,8 +1162,8 @@ contains
 !-----------------------------------------------------------------------
 
     TRITIUM_DECAY = lambda * tritium_loc
-    DTRACER_MODULE(:,:,tritium_ind) = -TRITIUM_DECAY
-    DTRACER_MODULE(:,:,helium3_ind) = TRITIUM_DECAY
+    DTRACER_MODULE(:,:,tr_ind)  = -TRITIUM_DECAY
+    DTRACER_MODULE(:,:,he3_ind) = TRITIUM_DECAY
 
     call accumulate_tavg_field(TRITIUM_DECAY, tavg_TRITIUM_DECAY,bid,k)
 

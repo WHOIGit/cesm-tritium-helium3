@@ -218,12 +218,17 @@
 
    character(*), parameter :: subname = 'passive_tracers:init_passive_tracers'
 
-   integer (int_kind) :: cumulative_nt, n, &
+   integer (int_kind) :: cumulative_nt, n, iblock, &
       nml_error,        &! error flag for nml read
       iostat             ! io status flag
 
    character (char_len) :: sname, lname, units, coordinates
    character (4) :: grid_loc
+
+   real (r8), dimension(:,:,:,:), allocatable :: &
+       TEMP_FILT,      & ! 3D temperature with time filter applied, [degC]
+       SALINITY_FILT,  & ! 3D salinity with time filter applied, [psu]
+       RHO3D_FILT        ! 3D density with time filter applied, [kg/m^3]
 
 !-----------------------------------------------------------------------
 !  register init_passive_tracers
@@ -418,8 +423,22 @@
 !-----------------------------------------------------------------------
 
    if (tr3he_on) then
-      call tr3he_init(init_ts_file_fmt, read_restart_filename, &
-                    tracer_d(tr3he_ind_begin:tr3he_ind_end), &
+      allocate(TEMP_FILT(nx_block,ny_block,km,max_blocks_clinic),     &
+               SALINITY_FILT(nx_block,ny_block,km,max_blocks_clinic), &
+               RHO3D_FILT(nx_block,ny_block,km,max_blocks_clinic))
+
+      do iblock = 1,nblocks_clinic
+         TEMP_FILT(:,:,:,iblock) = p5*(TRACER(:,:,:,1,oldtime,iblock) +     &
+             TRACER(:,:,:,1,curtime,iblock))                                
+         SALINITY_FILT(:,:,:,iblock) = p5*(TRACER(:,:,:,2,oldtime,iblock) + &
+             TRACER(:,:,:,2,curtime,iblock)) * salt_to_ppt                  
+         RHO3D_FILT(:,:,:,iblock) = p5*(RHO(:,:,:,oldtime,iblock) +         &
+             RHO(:,:,:,curtime,iblock)) * 1000.0_r8  ! g/cm^2 -> kg/m^3
+      end do
+
+      call tr3he_init(init_ts_file_fmt, read_restart_filename,       &
+                    TEMP_FILT, SALINITY_FILT, RHO3D_FILT,            &
+                    tracer_d(tr3he_ind_begin:tr3he_ind_end),         &
                     TRACER(:,:,:,tr3he_ind_begin:tr3he_ind_end,:,:), &
                     errorCode)
 
