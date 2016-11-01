@@ -5,7 +5,7 @@ module tr3he_mod
 !BOP
 ! !MODULE: tr3he_mod
 !
-!  Module for tritium (3H) and helium 3 (3He) 
+!  Module for tritium (3H) and helium 3 (3He)
 !
 !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
 !  Last modified on Tue Aug  9 2016 14:10:50 -0400
@@ -83,9 +83,12 @@ module tr3he_mod
 !-----------------------------------------------------------------------
 
    real (r8), parameter ::  &
-      Xhe = 5.24e-6_r8,     & ! atmospheric helium 4 mole fraction (mol/mol)
-      Ir  = 1.384e-6_r8,    & ! 3He/4He isotopic ratio
-      R   = 8.314425_r8       ! ideal gas constant in (m^3 Pa)/(K mol)
+      Xhe    = 5.24e-6_r8,  & ! atmospheric helium 4 mole fraction (mol/mol)
+      Ir     = 1.384e-6_r8, & ! 3He/4He isotopic ratio
+      R      = 8.314425_r8, & ! ideal gas constant in (m^3 Pa)/(K mol)
+      Patm   = 101325.0_r8, & ! standard atmospheric pressure in Pa
+      rhoair = 1.292_r8       ! density of air (kg/m^3)
+
 
 !-----------------------------------------------------------------------
 !  derived type & parameter for tracer index lookup
@@ -251,9 +254,6 @@ contains
        He3_SAT        ! helium 3 saturation
 
    logical (log_kind), dimension(nx_block,ny_block) ::  LAND_MASK_k
-
-   real (r8), parameter :: &
-       Patm = 101325.0_r8      ! 1 atm in Pa
 
 !-----------------------------------------------------------------------
 !  initialize forcing_monthly_every_ts variables
@@ -422,7 +422,7 @@ contains
                                   tracer_d_module,        &
                                   TRACER_MODULE)
 
-   case ('file', 'ccsm_startup') 
+   case ('file', 'ccsm_startup')
 
       call document(sub_name, 'tritium and 3He being read from separate file')
 
@@ -785,11 +785,11 @@ contains
                           SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
 
 ! !DESCRIPTION:
-!  Compute tritium and helium 3 surface fluxes and store related tavg 
+!  Compute tritium and helium 3 surface fluxes and store related tavg
 !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3
-!  are computed following Stanley et al. Biogeosciences 12, 5199-5210 (2015) 
-!  NOTE: Stanley's model uses mol/m^3 while CESM uses pmol/m^3 for helium 3. 
-!  So model helium 3 surface concentrations are converted to mol/m^3, the gas 
+!  are computed following Stanley et al. Biogeosciences 12, 5199-5210 (2015)
+!  NOTE: Stanley's model uses mol/m^3 while CESM uses pmol/m^3 for helium 3.
+!  So model helium 3 surface concentrations are converted to mol/m^3, the gas
 !  fluxes are computed in mols/m^2/s and then converted to pmol/m^2/s.
 
 ! !REVISION HISTORY:
@@ -840,22 +840,31 @@ contains
       SURF_VALS,       & ! filtered surface tracer values
       He3_SCHMIDT,     & ! helium 3 Schmidt number
       He4_SOL_0,       & ! solubility of helium 4 (pmol/m^3/Pa)
-      He3_BSOL_0,      & ! Bunsen solubility of helium 3
-      He3_DIFF,        & ! diffusivity of helium 3
+      ! He3_BSOL_0,      & ! Bunsen solubility of helium 3
+      ! He3_DIFF,        & ! diffusivity of helium 3
       He3_SURF_SAT,    & ! helium 3 surface saturation (pmol/m^3)
       He3_PPATM,       & ! helium 3 partial pressure in the atmosphere (Pa)
       He_ALPHA_SOL,    & ! temperature-dependent solubility fractionation
-      WIND_CUBED,      & ! (u10 - 2.27)**3
-      RT,              & ! R * (SST + T0_Kelvin)
-      ZB,              & ! bubble depth
-      PPB,             & ! 3He partial pressure in bubble
-      PPW,             & ! 3He partial pressure in water
-      XKW_ICE,         & ! (1-fice) * xkw (m/s)
-      PV,              & ! piston velocity (m/s)
+      ! WIND_CUBED,      & ! (u10 - 2.27)**3
+      ! RT,              & ! R * (SST + T0_Kelvin)
+      ! ZB,              & ! bubble depth
+      ! PPB,             & ! 3He partial pressure in bubble
+      ! PPW,             & ! 3He partial pressure in water
+      ! XKW_ICE,         & ! (1-fice) * xkw (m/s)
+      PV,              & ! tranfer velocity for diffusive gas exchange (m/s)
+      PVB,             & ! transfer velocity for large bubbles (m/s)
       FLUX_DGE,        & ! flux due to difusive gas exchange (pmol/m^2/s)
       FLUX_CTB,        & ! flux due to completely trapped bubbles (pmol/m^2/s)
       FLUX_PTB,        & ! flux due to partially trapped bubbles (pmol/m^2/s)
-      FLUX               ! total gas flux (pmol/m^2/s)
+      FLUX,            & ! total gas flux (pmol/m^2/s)
+      U10,             & ! wind speed at 10 m (m/s)
+      USTAR,           & ! friction velocity (m/s)
+      CD,              & ! drag coefficient
+      RW,              & ! water-side resistance to tranfer
+      RA,              & ! air-side resistance to transfer
+      ALPHA,           & ! dimensionless diffusivity
+      DELTA_P,         & ! supersaturation due to partially dissolved bubbles
+      DELTA_EQ           ! equilibrium supersaturation
 
    character (char_len) :: &
       tracer_data_label          ! label for what is being updated
@@ -874,13 +883,21 @@ contains
 !  local parameters
 !-----------------------------------------------------------------------
 
-   real (r8), parameter ::         &
+   real (r8), parameter ::          &
       !xkw_coeff  = 8.6e-7_r8,      & ! xkw_coeff = 0.31 cm/hr s^2/m^2 in (s/m)
-      xkw_coeff  = 6.02e-7_r8,     & ! 0.7 * 8.6e-7 from Stanley et. al 2015  (s/m)
-      alpha_diff = 1.0496_r8,      & ! 3He/4He diffusivity ratio (Bourg & Sposito 2008)
-      MH2O       = 18.01528e-3_r8, & ! molecular weight of water in kg
-      g          = 9.806_r8          ! gravitational acceleration in m/s^2
-      
+      xkw_coeff  = 6.02e-7_r8,      & ! 0.7 * 8.6e-7 from Stanley et. al 2015  (s/m)
+      alpha_diff = 1.0496_r8,       & ! 3He/4He diffusivity ratio (Bourg & Sposito 2008)
+      MH2O       = 18.01528e-3_r8,  & ! molecular weight of water in kg
+      g          = 9.806_r8,        & ! gravitational acceleration in m/s^2
+      !------ parameters for the Liang et al 2013 gas flux model --------
+      Sca        = 0.9_r8,          & ! Schmidt number of air
+      zw         = 0.5_r8,          & ! reference water depth
+      deltaw     = 0.01_r8,         & ! molecular sublayer thickness
+      kappa      = 0.4_r8,          &
+      A          = 1.3_r8,          &
+      phi        = 1.0_r8,          &
+      ha         = 0.13_r8,         &
+      hw         = 13.3_r8 / (A * phi)
 
 !-----------------------------------------------------------------------
 
@@ -976,8 +993,8 @@ contains
       if (tr3he_formulation == 'model') then
          where (LAND_MASK(:,:,iblock))
             IFRAC_USED(:,:,iblock)   = IFRAC(:,:,iblock)
-            U10_SQR_USED(:,:,iblock) = U10_SQR(:,:,iblock) * 1.e-4_r8 !(cm/s)**2 -> (m/s)**2
-            XKW_USED(:,:,iblock)     = xkw_coeff * U10_SQR_USED(:,:,iblock)
+            ! U10_SQR_USED(:,:,iblock) = U10_SQR(:,:,iblock) * 1.e-4_r8 !(cm/s)**2 -> (m/s)**2
+            ! XKW_USED(:,:,iblock)     = xkw_coeff * U10_SQR_USED(:,:,iblock)
             AP_USED(:,:,iblock)      = PRESS(:,:,iblock)
          endwhere
          where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) < c0) &
@@ -995,6 +1012,9 @@ contains
       !AP_USED(:,:,iblock) = AP_USED(:,:,iblock) * (c1 / 1013.25e+3_r8)
       AP_USED(:,:,iblock) = AP_USED(:,:,iblock) / c10
 
+      U10   = sqrt(U10_SQR(:,:,iblock)) * 1.e-2_r8 ! cm/s -> m/s
+      USTAR = calc_ustar(LAND_MASK(:,:,iblock), U10, RHO(:,:,iblock))
+      CD    = calc_cdu10(LAND_MASK(:,:,iblock), U10)
 
       He4_SOL_0 = he4_henry_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
           SSS(:,:,iblock))
@@ -1003,48 +1023,68 @@ contains
 
       He3_SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
 
-      He3_BSOL_0 = he4_bunsen_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
-          SSS(:,:,iblock)) * He_ALPHA_SOL
+      ! He3_BSOL_0 = he4_bunsen_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+      !     SSS(:,:,iblock)) * He_ALPHA_SOL
 
-      He3_DIFF = diff_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) * alpha_diff
+      ! He3_DIFF = diff_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) * alpha_diff
 
       where (LAND_MASK(:,:,iblock))
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_IFRAC,iblock)     = IFRAC_USED(:,:,iblock)
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_XKW,iblock)       = XKW_USED(:,:,iblock)
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_ATM_PRESS,iblock) = AP_USED(:,:,iblock)
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)   = He3_SCHMIDT
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_IFRAC,iblock)     = IFRAC_USED(:,:,iblock)
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_ATM_PRESS,iblock) = AP_USED(:,:,iblock)
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)   = He3_SCHMIDT
 
 !-----------------------------------------------------------------------
 !        Diffusive gas exchange (pmol/m^3/s)
 !-----------------------------------------------------------------------
 
-         XKW_ICE = (c1 - IFRAC_USED(:,:,iblock)) * XKW_USED(:,:,iblock)
-         He3_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
-         He3_SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * He3_PPATM ! mol/m^3
-         PV = XKW_ICE * sqrt(660.0_r8 / He3_SCHMIDT)
-         SURF_VALS = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +               &
-                         SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
-         FLUX_DGE = PV * (He3_SURF_SAT - SURF_VALS) * 1.e+12_r8 ! mol -> pmol
+        !  XKW_ICE = (c1 - IFRAC_USED(:,:,iblock)) * XKW_USED(:,:,iblock)
+        !  PV = XKW_ICE * sqrt(660.0_r8 / He3_SCHMIDT)
+        He3_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
+        He3_SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * He3_PPATM ! mol/m^3
+        SURF_VALS = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +                    &
+                        SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
+        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(He3_SCHMIDT) +          &
+                  log(zw/deltaw)/kappa)
+        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+        ALPHA = He3_SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+        XKW_USED(:,:,iblock) = USTAR / (RW + ALPHA * RA)
+        PV = (c1 - IFRAC_USED(:,:,iblock)) * XKW_USED(:,:,iblock)
+        !  FLUX_DGE = PV * (He3_SURF_SAT - SURF_VALS) * 1.e+12_r8 ! mol -> pmol
+        FLUX_DGE = PV * He3_SURF_SAT * (AP_USED(:,:,iblock)/Patm -                &
+                                    SURF_VALS/He3_SURF_SAT) * 1.e+12_r8 ! mol -> pmol
 
 !-----------------------------------------------------------------------
 !        Flux due to completely trapped bubbles (pmol/m^3/s)
 !-----------------------------------------------------------------------
 
-         WIND_CUBED = max(c0, sqrt(U10_SQR_USED(:,:,iblock)) - 2.27_r8)**3
-         RT = R * (SST(:,:,iblock) + T0_Kelvin)
-         FLUX_CTB = 9.1e-11_r8 * WIND_CUBED * He3_PPATM / RT                   &
-             * (c1 - IFRAC_USED(:,:,iblock)) * 1.e+12_r8 ! mol -> pmol
+        !  WIND_CUBED = max(c0, sqrt(U10_SQR_USED(:,:,iblock)) - 2.27_r8)**3
+        !  RT = R * (SST(:,:,iblock) + T0_Kelvin)
+        !  FLUX_CTB = 9.1e-11_r8 * WIND_CUBED * He3_PPATM / RT                   &
+        !      * (c1 - IFRAC_USED(:,:,iblock)) * 1.e+12_r8 ! mol -> pmol
+        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir  * 1.e+12_r8 ! mol -> pmol
 
 !-----------------------------------------------------------------------
 !        Flux due to partially trapped bubbles (pmol/m^3/s)
 !-----------------------------------------------------------------------
-         
-         ZB  = max(c0, 0.15_r8 * sqrt(U10_SQR_USED(:,:,iblock)) - 0.55_r8)
-         PPB = Xhe * Ir * (AP_USED(:,:,iblock) + RHO(:,:,iblock) * g * ZB)
-         PPW = SURF_VALS / (He4_SOL_0 * He_ALPHA_SOL)
-         FLUX_PTB = 2.2e-3_r8 * WIND_CUBED * He3_BSOL_0                        &
-             * He3_DIFF**(2.0_r8/3.0_r8) * (PPB - PPW) / RT                    &
-             * (c1 - IFRAC_USED(:,:,iblock)) * 1.e+12_r8 ! mol -> pmol
+
+        !  ZB  = max(c0, 0.15_r8 * sqrt(U10_SQR_USED(:,:,iblock)) - 0.55_r8)
+        !  PPB = Xhe * Ir * (AP_USED(:,:,iblock) + RHO(:,:,iblock) * g * ZB)
+        !  PPW = SURF_VALS / (He4_SOL_0 * He_ALPHA_SOL)
+        !  FLUX_PTB = 2.2e-3_r8 * WIND_CUBED * He3_BSOL_0                        &
+        !      * He3_DIFF**(2.0_r8/3.0_r8) * (PPB - PPW) / RT                    &
+        !      * (c1 - IFRAC_USED(:,:,iblock)) * 1.e+12_r8 ! mol -> pmol
+        PVB = 1.98e+6_r8 * USTAR**2.76_r8 * (He3_SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+              * 1.e-2_r8/360.0_r8 ! cm/hr -> m
+        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+        FLUX_PTB = PVB * He3_SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                   - SURF_VALS/He3_SURF_SAT) * 1.e+12_r8 ! mol -> pmol
+
+!-----------------------------------------------------------------------
+!        equilibrium supersaturation (fraction)
+!-----------------------------------------------------------------------
+
+        DELTA_EQ = (PVB * SURF_VALS * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                   / ((PVB + PV) * SURF_VALS * AP_USED(:,:,iblock)/Patm)
 
 !-----------------------------------------------------------------------
 !        Total gas flux
@@ -1054,13 +1094,13 @@ contains
          STF_MODULE(:,:,he3_ind,iblock) = FLUX
 
 !-----------------------------------------------------------------------
-
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock)     = He3_SURF_SAT * 1.e+12_r8 ! mol->pmol
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_PV,iblock)           = PV
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock) = FLUX_DGE
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock) = FLUX_CTB
-         tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock) = FLUX_PTB
-         tr3he_SFLUX_TAVG(:,:,buf_ind_3He_GAS_FLUX,iblock)    = FLUX
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_XKW,iblock)          = XKW_USED(:,:,iblock)
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock)     = He3_SURF_SAT * 1.e+12_r8 ! mol->pmol
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_PV,iblock)           = PV
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock) = FLUX_DGE
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock) = FLUX_CTB
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock) = FLUX_PTB
+        tr3he_SFLUX_TAVG(:,:,buf_ind_3He_GAS_FLUX,iblock)    = FLUX
       elsewhere
          STF_MODULE(:,:,he3_ind,iblock) = c0
       endwhere
@@ -1149,7 +1189,7 @@ contains
 !                              TRACER_MODULE_CUR(:,:,k,he3_ind)))
 
 !-----------------------------------------------------------------------
-!  apply LAND_MASK to local copies 
+!  apply LAND_MASK to local copies
 !-----------------------------------------------------------------------
 
    where (.not. LAND_MASK(:,:,bid) .or. k > KMT(:,:,bid))
@@ -1180,7 +1220,7 @@ contains
  function he4_bunsen_sol_0(LAND_MASK, SST, SSS)
 
 ! !DESCRIPTION:
-!  Compute the Bunsen solubility coefficient for helium 4 
+!  Compute the Bunsen solubility coefficient for helium 4
 !  Ref : Weiss (1971), Journal of Chemical & Engineering Data
 !        Vol 16, No. 2 (Table II and Equation 1)
 !
@@ -1201,7 +1241,7 @@ contains
 ! !OUTPUT PARAMETERS:
 
    real (r8), dimension(nx_block,ny_block) :: &
-      he4_bunsen_sol_0           ! Bunsen solubility of helium 4 
+      he4_bunsen_sol_0           ! Bunsen solubility of helium 4
 
 !EOP
 !BOC
@@ -1264,7 +1304,7 @@ contains
 ! !OUTPUT PARAMETERS:
 
    real (r8), dimension(nx_block,ny_block) :: &
-      he4_henry_sol_0    ! Henry's Law solubility coefficient of helium 4 
+      he4_henry_sol_0    ! Henry's Law solubility coefficient of helium 4
 
 !EOP
 !BOC
@@ -1286,7 +1326,7 @@ contains
 !-----------------------------------------------------------------------
 
    where (LAND_MASK)
-       he4_henry_sol_0 = Bsol / (R * T0_Kelvin) 
+       he4_henry_sol_0 = Bsol / (R * T0_Kelvin)
    elsewhere
        he4_henry_sol_0 = c0
    endwhere
@@ -1345,7 +1385,7 @@ contains
  function schmidt_he4(LAND_MASK, SST)
 
 ! !DESCRIPTION:
-!  Compute Schmidt number for helium 4 (Wanninkhof 1992) 
+!  Compute Schmidt number for helium 4 (Wanninkhof 1992)
 !
 ! !REVISION HISTORY:
 !  same as module
@@ -1388,17 +1428,17 @@ contains
 !-----------------------------------------------------------------------
 !EOC
 
- end function schmidt_he4
+  end function schmidt_he4
 
 !***********************************************************************
 !BOP
 ! !IROUTINE: diff_he4
 ! !INTERFACE:
 
- function diff_he4(LAND_MASK, SST)
+  function diff_he4(LAND_MASK, SST)
 
 ! !DESCRIPTION:
-!  Compute diffusivity coefficient for helium 4 in m^2/s 
+!  Compute diffusivity coefficient for helium 4 in m^2/s
 !  Jahne et al. JGR 92 C10 (1987)
 !
 ! !REVISION HISTORY:
@@ -1445,6 +1485,105 @@ contains
 !EOC
 
  end function diff_he4
+
+ !***********************************************************************
+ !BOP
+ ! !IROUTINE: calc_cdu10
+ ! !INTERFACE:
+
+ function calc_cdu10(LAND_MASK, U10) result(cd)
+
+ ! !DESCRIPTION:
+ !  Compute drag coefficient from u10
+ !  Large & Pond JPO, 11 (1981)
+ !
+ ! !REVISION HISTORY:
+ !  same as module
+
+ ! !USES:
+
+ ! !INPUT PARAMETERS:
+
+    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+       LAND_MASK          ! land mask for this block
+
+    real (r8), dimension(nx_block,ny_block), intent(in) :: &
+       U10                ! wind speed at 10 m (m/s)
+
+ ! !OUTPUT PARAMETERS:
+
+    real (r8), dimension(nx_block,ny_block) :: &
+       cd                ! drag coefficient
+
+ !EOP
+ !BOC
+ !-----------------------------------------------------------------------
+
+    where (LAND_MASK)
+        cd = (0.49_r8 + 0.065_r8 * U10) * 1.e-3_r8
+        where(U10<=11) cd = 0.0012_r8
+        where(U10>=20) cd = 0.0018_r8
+    elsewhere
+        cd = c0
+    endwhere
+
+ !-----------------------------------------------------------------------
+ !EOC
+
+ end function calc_cdu10
+
+  !***********************************************************************
+  !BOP
+  ! !IROUTINE: calc_ustar
+  ! !INTERFACE:
+
+ function calc_ustar(LAND_MASK, U10, RHO) result(ustar)
+
+  ! !DESCRIPTION:
+  !  Compute friction velocity from u10 and sea water density (rhosw in kg/m^3)
+  !  Liang et al GBC 27:894-905 (2013)
+  !
+  ! !REVISION HISTORY:
+  !  same as module
+
+  ! !USES:
+
+  ! !INPUT PARAMETERS:
+
+     logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+        LAND_MASK          ! land mask for this block
+
+     real (r8), dimension(nx_block,ny_block), intent(in) :: &
+        U10,             & ! wind speed at 10 m (m/s)
+        RHO                ! surface water density (kg/m^3)
+
+  ! !OUTPUT PARAMETERS:
+
+     real (r8), dimension(nx_block,ny_block) :: &
+        ustar                ! friction velocity
+
+  !EOP
+  !BOC
+  !-----------------------------------------------------------------------
+  !  local variables
+  !-----------------------------------------------------------------------
+
+     real (r8), dimension(nx_block,ny_block) :: &
+         cd                     ! drag coefficient
+
+  !-----------------------------------------------------------------------
+
+     where (LAND_MASK)
+         cd    = calc_cdu10(LAND_MASK,U10)
+         ustar = sqrt(rhoair/RHO * cd) * U10
+     elsewhere
+         ustar = c0
+     endwhere
+
+  !-----------------------------------------------------------------------
+  !EOC
+
+ end function calc_ustar
 
 !***********************************************************************
 !BOP
