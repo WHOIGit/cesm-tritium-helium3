@@ -8,7 +8,7 @@ module tr3he_mod
   !  Module for tritium (3H) and helium 3 (3He)
   !
   !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-  !  Last modified on Tue Aug  9 2016 14:10:50 -0400
+  !  Last modified on 2016-11-08 15:52
   !
   ! !DESCRIPTION:
   !
@@ -61,7 +61,7 @@ module tr3he_mod
   !-----------------------------------------------------------------------
 
   integer (int_kind), parameter :: &
-    tr3he_tracer_cnt = 3
+    tr3he_tracer_cnt = 4
 
   !-----------------------------------------------------------------------
   !  flags controlling which portion of code are executed
@@ -75,9 +75,10 @@ module tr3he_mod
   !-----------------------------------------------------------------------
 
   integer (int_kind), parameter :: &
-    tr_ind  =  1,  & ! tritium
-    he3_ind =  2,  & ! helium 3
-    he4_ind =  3     ! helium 4
+    tr_ind        = 1, & ! tritium
+    he3_ind       = 2, & ! helium 3
+    he3_inert_ind = 3, & ! inert helium 3
+    he4_ind       = 4    ! helium 4
 
   !-----------------------------------------------------------------------
   !  gas flux parameters
@@ -97,9 +98,10 @@ module tr3he_mod
 
   type(ind_name_pair), dimension(tr3he_tracer_cnt) :: &
     ind_name_table = (/ &
-    ind_name_pair(tr_ind,  'TRITIUM'), &
-    ind_name_pair(he3_ind, 'HELIUM3'), &
-    ind_name_pair(he4_ind, 'HELIUM4') /)
+    ind_name_pair(tr_ind,        'TRITIUM'), &
+    ind_name_pair(he3_ind,       'HELIUM3'), &
+    ind_name_pair(he3_inert_ind, 'INERT_HELIUM3'), &
+    ind_name_pair(he4_ind,       'HELIUM4') /)
 
   !-----------------------------------------------------------------------
   !  mask that eases avoidance of computation over land
@@ -136,25 +138,33 @@ module tr3he_mod
     tr3he_SFLUX_TAVG
 
   integer (int_kind) :: &
-    tavg_tr3He_IFRAC,       bufind_tr3He_IFRAC,      & ! tavg id for ice fraction
-    tavg_tr3He_XKW,         bufind_tr3He_XKW,        & ! tavg id for xkw
-    tavg_tr3He_ATM_PRESS,   bufind_tr3He_ATM_PRESS,  & ! tavg id for atmospheric pressure
-    tavg_3He_SCHMIDT,       bufind_3He_SCHMIDT,      & ! tavg id for 3He Schmidt number
-    tavg_3He_KS,            bufind_3He_KS,           & ! tavg id for 3He transfer velocity for DGE
-    tavg_3He_KB,            bufind_3He_KB,           & ! tavg id for 3He transfer velocity for large bubbles
-    tavg_3He_SURF_SAT,      bufind_3He_SURF_SAT,     & ! tavg id for 3He surface saturation
-    tavg_3He_GAS_FLUX_DGE,  bufind_3He_GAS_FLUX_DGE, & ! tavg id for 3He disusive gas exchange
-    tavg_3He_GAS_FLUX_CTB,  bufind_3He_GAS_FLUX_CTB, & ! tavg id for 3He completely trapped bubbles
-    tavg_3He_GAS_FLUX_PTB,  bufind_3He_GAS_FLUX_PTB, & ! tavg id for 3He partially trapped bubbles
-    tavg_3He_GAS_FLUX,      bufind_3He_GAS_FLUX,     & ! tavg id for 3He total gas flux
-    tavg_4He_SCHMIDT,       bufind_4He_SCHMIDT,      & ! tavg id for 4He Schmidt number
-    tavg_4He_KS,            bufind_4He_KS,           & ! tavg id for 4He transfer velocity for DGE
-    tavg_4He_KB,            bufind_4He_KB,           & ! tavg id for 4He transfer velocity for large bubbles
-    tavg_4He_SURF_SAT,      bufind_4He_SURF_SAT,     & ! tavg id for 4He surface saturation
-    tavg_4He_GAS_FLUX_DGE,  bufind_4He_GAS_FLUX_DGE, & ! tavg id for 4He disusive gas exchange
-    tavg_4He_GAS_FLUX_CTB,  bufind_4He_GAS_FLUX_CTB, & ! tavg id for 4He completely trapped bubbles
-    tavg_4He_GAS_FLUX_PTB,  bufind_4He_GAS_FLUX_PTB, & ! tavg id for 4He partially trapped bubbles
-    tavg_4He_GAS_FLUX,      bufind_4He_GAS_FLUX        ! tavg id for 4He total gas flux
+    tavg_tr3He_IFRAC,             bufind_tr3He_IFRAC,            & ! tavg id for ice fraction
+    tavg_tr3He_XKW,               bufind_tr3He_XKW,              & ! tavg id for xkw
+    tavg_tr3He_ATM_PRESS,         bufind_tr3He_ATM_PRESS,        & ! tavg id for atmospheric pressure
+    tavg_3He_SCHMIDT,             bufind_3He_SCHMIDT,            & ! tavg id for 3He Schmidt number
+    tavg_3He_KS,                  bufind_3He_KS,                 & ! tavg id for 3He transfer velocity for DGE
+    tavg_3He_KB,                  bufind_3He_KB,                 & ! tavg id for 3He transfer velocity for large bubbles
+    tavg_3He_SURF_SAT,            bufind_3He_SURF_SAT,           & ! tavg id for 3He surface saturation
+    tavg_3He_GAS_FLUX_DGE,        bufind_3He_GAS_FLUX_DGE,       & ! tavg id for 3He disusive gas exchange
+    tavg_3He_GAS_FLUX_CTB,        bufind_3He_GAS_FLUX_CTB,       & ! tavg id for 3He completely trapped bubbles
+    tavg_3He_GAS_FLUX_PTB,        bufind_3He_GAS_FLUX_PTB,       & ! tavg id for 3He partially trapped bubbles
+    tavg_3He_GAS_FLUX,            bufind_3He_GAS_FLUX,           & ! tavg id for 3He total gas flux
+    tavg_3He_inert_SCHMIDT,       bufind_3He_inert_SCHMIDT,      & ! tavg id for inert 3He Schmidt number
+    tavg_3He_inert_KS,            bufind_3He_inert_KS,           & ! tavg id for inert 3He transfer velocity for DGE
+    tavg_3He_inert_KB,            bufind_3He_inert_KB,           & ! tavg id for inert 3He transfer velocity for large bubbles
+    tavg_3He_inert_SURF_SAT,      bufind_3He_inert_SURF_SAT,     & ! tavg id for inert 3He surface saturation
+    tavg_3He_inert_GAS_FLUX_DGE,  bufind_3He_inert_GAS_FLUX_DGE, & ! tavg id for inert 3He disusive gas exchange
+    tavg_3He_inert_GAS_FLUX_CTB,  bufind_3He_inert_GAS_FLUX_CTB, & ! tavg id for inert 3He completely trapped bubbles
+    tavg_3He_inert_GAS_FLUX_PTB,  bufind_3He_inert_GAS_FLUX_PTB, & ! tavg id for inert 3He partially trapped bubbles
+    tavg_3He_inert_GAS_FLUX,      bufind_3He_inert_GAS_FLUX,     & ! tavg id for inert 3He total gas flux
+    tavg_4He_SCHMIDT,             bufind_4He_SCHMIDT,            & ! tavg id for 4He Schmidt number
+    tavg_4He_KS,                  bufind_4He_KS,                 & ! tavg id for 4He transfer velocity for DGE
+    tavg_4He_KB,                  bufind_4He_KB,                 & ! tavg id for 4He transfer velocity for large bubbles
+    tavg_4He_SURF_SAT,            bufind_4He_SURF_SAT,           & ! tavg id for 4He surface saturation
+    tavg_4He_GAS_FLUX_DGE,        bufind_4He_GAS_FLUX_DGE,       & ! tavg id for 4He disusive gas exchange
+    tavg_4He_GAS_FLUX_CTB,        bufind_4He_GAS_FLUX_CTB,       & ! tavg id for 4He completely trapped bubbles
+    tavg_4He_GAS_FLUX_PTB,        bufind_4He_GAS_FLUX_PTB,       & ! tavg id for 4He partially trapped bubbles
+    tavg_4He_GAS_FLUX,            bufind_4He_GAS_FLUX              ! tavg id for 4He total gas flux
 
   !-----------------------------------------------------------------------
   !  define tavg id for nonstandard 3d fields
@@ -244,7 +254,7 @@ contains
     type(tracer_read), dimension(tr3he_tracer_cnt) :: &
       tracer_init_ext           ! namelist variable for initializing tracers
 
-    type(tracer_read) ::       &
+    type(tracer_read) ::      &
       gas_flux_fice,          & ! ice fraction for gas fluxes
       gas_flux_ws,            & ! wind speed for gas fluxes
       gas_flux_ap               ! atmospheric pressure for gas fluxes
@@ -279,8 +289,9 @@ contains
     !  initialize tracer_d values
     !-----------------------------------------------------------------------
 
-    tracer_d_module(tr_ind)%long_name   = 'tritium'
-    tracer_d_module(he3_ind)%long_name  = 'helium 3'
+    tracer_d_module(tr_ind)%long_name        = 'tritium'
+    tracer_d_module(he3_ind)%long_name       = 'helium 3'
+    tracer_d_module(he3_inert_ind)%long_name = 'inert helium 3'
     do n = 1, tr3he_tracer_cnt - 1
       tracer_d_module(n)%short_name = ind_name_table(n)%name
       tracer_d_module(n)%units      = 'pmol/m^3'
@@ -581,6 +592,8 @@ contains
     var_cnt = var_cnt+1
     bufind_tr3He_ATM_PRESS = var_cnt
 
+    !-----------------------------------------------------------------------
+
     call define_tavg_field(tavg_3He_SCHMIDT,'HELIUM3_SCHMIDT',2, &
       long_name='3He Schmidt number',                            &
       units='none', grid_loc='2110')
@@ -628,6 +641,56 @@ contains
       units='pmol/m^2/s', grid_loc='2110')
     var_cnt = var_cnt+1
     bufind_3He_GAS_FLUX_PTB = var_cnt
+
+    !-----------------------------------------------------------------------
+
+    call define_tavg_field(tavg_3He_inert_SCHMIDT,'INERT_HELIUM3_SCHMIDT',2, &
+      long_name='3He Schmidt number',                            &
+      units='none', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_SCHMIDT = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_KS,'INERT_HELIUM3_KS',2,              &
+      long_name='3He transfer velocity for diffusive gas exchange', &
+      units='m/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_KS = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_KB,'INERT_HELIUM3_KB',2,              &
+      long_name='3He transfer velocity for large bubbles', &
+      units='m/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_KB = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_SURF_SAT,'INERT_HELIUM3_SURF_SAT',2, &
+      long_name='3He saturation',                                  &
+      units='pmol/m^3', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_SURF_SAT = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_GAS_FLUX,'STF_INERT_HELIUM3',2, &
+      long_name='3He surface gas flux',                       &
+      units='pmol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_GAS_FLUX = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_GAS_FLUX_DGE,'STF_INERT_HELIUM3_DGE',2, &
+      long_name='3He surface flux due to difusive gas exchange',      &
+      units='pmol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_GAS_FLUX_DGE = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_GAS_FLUX_CTB,'STF_INERT_HELIUM3_CTB',2, &
+      long_name='3He surface flux due to completely trapped bubbles', &
+      units='pmol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_GAS_FLUX_CTB = var_cnt
+
+    call define_tavg_field(tavg_3He_inert_GAS_FLUX_PTB,'STF_INERT_HELIUM3_PTB',2, &
+      long_name='3He surface flux due to partially trapped bubbles',  &
+      units='pmol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_3He_inert_GAS_FLUX_PTB = var_cnt
 
     !-----------------------------------------------------------------------
 
@@ -855,12 +918,13 @@ contains
     SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
 
     ! !DESCRIPTION:
-    !  Compute tritium and helium 3 surface fluxes and store related tavg
-    !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3
-    !  are computed following Liang et al. GBC 27, 894-905 (2013)
-    !  NOTE: the gas flux model uses mol/m^3 while CESM uses pmol/m^3 for helium 3.
-    !  So model helium 3 surface concentrations are converted to mol/m^3, the gas
-    !  fluxes are computed in mols/m^2/s and then converted to pmol/m^2/s.
+    !  Compute tritium and helium surface fluxes and store related tavg
+    !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3 and
+    !  helium 4 are computed following Liang et al. GBC 27, 894-905 (2013)
+    !  NOTE: the gas flux model uses mol/m^3 while CESM uses pmol/m^3 for helium 3
+    !  and mumol/m^3 for helium 4. So model helium 3 & helium 4 surface
+    !  concentrations are converted to mol/m^3, the gas fluxes are computed in
+    !  mols/m^2/s and then converted to pmol/m^2/s and mumol/m^2/s.
 
     ! !REVISION HISTORY:
     !  same as module
@@ -907,8 +971,7 @@ contains
 
     real (r8), dimension(nx_block,ny_block) :: &
       SURF_VAL,        & ! filtered surface tracer values
-      He3_SCHMIDT,     & ! helium 3 Schmidt number
-      He4_SCHMIDT,     & ! helium 4 Schmidt number
+      SCHMIDT,         & ! gas Schmidt number
       He4_SOL_0,       & ! solubility of helium 4 (pmol/m^3/Pa)
       SURF_SAT,        & ! gas surface saturation (pmol/m^3)
       GAS_PPATM,       & ! gas partial pressure in the atmosphere (Pa)
@@ -1089,28 +1152,28 @@ contains
       !  3He fluxes
       !-----------------------------------------------------------------------
 
-      He3_SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
+      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
 
       where (LAND_MASK(:,:,iblock))
 
         !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
         GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
         SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +                    &
+        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +                     &
           SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(He3_SCHMIDT) +          &
+        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
           log(zw/deltaw)/kappa)
         RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
         ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
         KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
-        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -             &
+        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
           SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
 
         !---------- Flux due to completely trapped bubbles (pmol/m^3/s) --------
         FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir  * 1.e+12_r8 ! mol -> pmol
 
         !---------- Flux due to partially trapped bubbles (pmol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (He3_SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
           * 1.e-2_r8/360.0_r8 ! cm/hr -> m
         DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
         FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
@@ -1126,7 +1189,7 @@ contains
 
         !-----------------------------------------------------------------------
         ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)      = He3_SCHMIDT
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)      = SCHMIDT
         tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
         tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock)           = KS
         tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock)           = KB
@@ -1139,19 +1202,72 @@ contains
       endwhere
 
       !-----------------------------------------------------------------------
+      !  inert 3He fluxes
+      !-----------------------------------------------------------------------
+
+      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
+
+      where (LAND_MASK(:,:,iblock))
+
+        !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
+        GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
+        SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
+        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_inert_ind,iblock) +               &
+          SURF_VALS_CUR(:,:,he3_inert_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
+        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
+          log(zw/deltaw)/kappa)
+        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
+          SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
+
+        !---------- Flux due to completely trapped bubbles (pmol/m^3/s) --------
+        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir  * 1.e+12_r8 ! mol -> pmol
+
+        !---------- Flux due to partially trapped bubbles (pmol/m^3/s) ---------
+        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
+        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+          - SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
+
+        !---------- equilibrium supersaturation (fraction) ---------------------
+        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+        !---------- Total gas flux ---------------------------------------------
+        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+        STF_MODULE(:,:,he3_inert_ind,iblock) = FLUX
+
+        !-----------------------------------------------------------------------
+        ! store tavg
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock)      = SCHMIDT
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock)           = KS
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock)           = KB
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock) = FLUX_DGE
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock) = FLUX_CTB
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock) = FLUX_PTB
+        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock)     = FLUX
+      elsewhere
+        STF_MODULE(:,:,he3_inert_ind,iblock) = c0
+      endwhere
+
+      !-----------------------------------------------------------------------
       !  4He fluxes
       !-----------------------------------------------------------------------
 
-      He4_SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock))
 
       where (LAND_MASK(:,:,iblock))
 
         !---------- Diffusive gas exchange (mumol/m^3/s) -----------------------
         GAS_PPATM = Xhe * AP_USED(:,:,iblock)
         SURF_SAT = He4_SOL_0 * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he4_ind,iblock) +                      &
+        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he4_ind,iblock) +                     &
           SURF_VALS_CUR(:,:,he4_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(He4_SCHMIDT) +          &
+        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
           log(zw/deltaw)/kappa)
         RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
         ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
@@ -1163,7 +1279,7 @@ contains
         FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * 1.e+6_r8 ! mol -> mumol
 
         !---------- Flux due to partially trapped bubbles (mumol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (He4_SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
           * 1.e-2_r8/360.0_r8 ! cm/hr -> m
         DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
         FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
@@ -1179,7 +1295,7 @@ contains
 
         !-----------------------------------------------------------------------
         ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock)      = He4_SCHMIDT
+        tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock)      = SCHMIDT
         tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
         tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock)           = KS
         tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock)           = KB
@@ -1700,43 +1816,59 @@ contains
     !$OMP PARALLEL DO PRIVATE(iblock)
 
     do iblock = 1, nblocks_clinic
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock),       &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock),            &
         tavg_tr3He_IFRAC,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock),         &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock),              &
         tavg_tr3He_XKW,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock),   &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock),        &
         tavg_tr3He_ATM_PRESS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock),       &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock),            &
         tavg_3He_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock),            &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock),                 &
         tavg_3He_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock),            &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock),                 &
         tavg_3He_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock),      &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock),           &
         tavg_3He_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock),      &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock),           &
         tavg_3He_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock),       &
         tavg_3He_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock),       &
         tavg_3He_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock),       &
         tavg_3He_GAS_FLUX_PTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock),       &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock),      &
+        tavg_3He_inert_SCHMIDT,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock),           &
+        tavg_3He_inert_KS,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock),           &
+        tavg_3He_inert_KB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock),     &
+        tavg_3He_inert_SURF_SAT,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock),     &
+        tavg_3He_inert_GAS_FLUX,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock), &
+        tavg_3He_inert_GAS_FLUX_DGE,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock), &
+        tavg_3He_inert_GAS_FLUX_CTB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock), &
+        tavg_3He_inert_GAS_FLUX_PTB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock),            &
         tavg_4He_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock),            &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock),                 &
         tavg_4He_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock),            &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock),                 &
         tavg_4He_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock),      &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock),           &
         tavg_4He_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock),      &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock),           &
         tavg_4He_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock),       &
         tavg_4He_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock),       &
         tavg_4He_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock),  &
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock),       &
         tavg_4He_GAS_FLUX_PTB,iblock,1)
     end do
 
