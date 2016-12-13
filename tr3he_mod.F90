@@ -61,7 +61,7 @@ module tr3he_mod
   !-----------------------------------------------------------------------
 
   integer (int_kind), parameter :: &
-    tr3he_tracer_cnt = 4
+    tr3he_tracer_cnt = 5
 
   !-----------------------------------------------------------------------
   !  flags controlling which portion of code are executed
@@ -78,13 +78,15 @@ module tr3he_mod
     tr_ind        = 1, & ! tritium
     he3_ind       = 2, & ! helium 3
     he3_inert_ind = 3, & ! inert helium 3
-    he4_ind       = 4    ! helium 4
+    he4_ind       = 4, & ! helium 4
+    ne_ind        = 5    ! neon
 
   !-----------------------------------------------------------------------
   !  gas flux parameters
   !-----------------------------------------------------------------------
 
   real (r8), parameter :: &
+    Xne    = 18.18e-6_r8, & ! Neon atmospheric mole fraction (mol/mol)
     Xhe    = 5.24e-6_r8,  & ! atmospheric helium 4 mole fraction (mol/mol)
     Ir     = 1.384e-6_r8, & ! 3He/4He isotopic ratio
     R      = 8.314425_r8, & ! ideal gas constant in (m^3 Pa)/(K mol)
@@ -98,10 +100,11 @@ module tr3he_mod
 
   type(ind_name_pair), dimension(tr3he_tracer_cnt) :: &
     ind_name_table = (/ &
-    ind_name_pair(tr_ind,        'TRITIUM'), &
-    ind_name_pair(he3_ind,       'HELIUM3'), &
+    ind_name_pair(tr_ind,        'TRITIUM'),       &
+    ind_name_pair(he3_ind,       'HELIUM3'),       &
     ind_name_pair(he3_inert_ind, 'INERT_HELIUM3'), &
-    ind_name_pair(he4_ind,       'HELIUM4') /)
+    ind_name_pair(he4_ind,       'HELIUM4'),       &
+    ind_name_pair(ne_ind,        'NEON') /)
 
   !-----------------------------------------------------------------------
   !  mask that eases avoidance of computation over land
@@ -164,7 +167,15 @@ module tr3he_mod
     tavg_4He_GAS_FLUX_DGE,        bufind_4He_GAS_FLUX_DGE,       & ! tavg id for 4He disusive gas exchange
     tavg_4He_GAS_FLUX_CTB,        bufind_4He_GAS_FLUX_CTB,       & ! tavg id for 4He completely trapped bubbles
     tavg_4He_GAS_FLUX_PTB,        bufind_4He_GAS_FLUX_PTB,       & ! tavg id for 4He partially trapped bubbles
-    tavg_4He_GAS_FLUX,            bufind_4He_GAS_FLUX              ! tavg id for 4He total gas flux
+    tavg_4He_GAS_FLUX,            bufind_4He_GAS_FLUX,           & ! tavg id for 4He total gas flux
+    tavg_Ne_SCHMIDT,              bufind_Ne_SCHMIDT,             & ! tavg id for Ne Schmidt number
+    tavg_Ne_KS,                   bufind_Ne_KS,                  & ! tavg id for Ne transfer velocity for DGE
+    tavg_Ne_KB,                   bufind_Ne_KB,                  & ! tavg id for Ne transfer velocity for large bubbles
+    tavg_Ne_SURF_SAT,             bufind_Ne_SURF_SAT,            & ! tavg id for Ne surface saturation
+    tavg_Ne_GAS_FLUX_DGE,         bufind_Ne_GAS_FLUX_DGE,        & ! tavg id for Ne disusive gas exchange
+    tavg_Ne_GAS_FLUX_CTB,         bufind_Ne_GAS_FLUX_CTB,        & ! tavg id for Ne completely trapped bubbles
+    tavg_Ne_GAS_FLUX_PTB,         bufind_Ne_GAS_FLUX_PTB,        & ! tavg id for Ne partially trapped bubbles
+    tavg_Ne_GAS_FLUX,             bufind_Ne_GAS_FLUX               ! tavg id for Ne total gas flux
 
   !-----------------------------------------------------------------------
   !  define tavg id for nonstandard 3d fields
@@ -304,6 +315,12 @@ contains
     tracer_d_module(he4_ind)%units      = 'mumol/m^3'
     tracer_d_module(he4_ind)%tend_units = 'mumol/m^3'
     tracer_d_module(he4_ind)%flux_units = 'mumol/m^2/s'
+
+    tracer_d_module(ne_ind)%long_name  = 'neon'
+    tracer_d_module(ne_ind)%short_name = ind_name_table(ne_ind)%name
+    tracer_d_module(ne_ind)%units      = 'mumol/m^3'
+    tracer_d_module(ne_ind)%tend_units = 'mumol/m^3'
+    tracer_d_module(ne_ind)%flux_units = 'mumol/m^2/s'
 
     !-----------------------------------------------------------------------
     !  default namelist settings
@@ -744,6 +761,56 @@ contains
 
     !-----------------------------------------------------------------------
 
+    call define_tavg_field(tavg_Ne_SCHMIDT,'NEON_SCHMIDT',2, &
+      long_name='Ne Schmidt number',                            &
+      units='none', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_SCHMIDT = var_cnt
+
+    call define_tavg_field(tavg_Ne_KS,'NEON_KS',2,              &
+      long_name='Ne transfer velocity for diffusive gas exchange', &
+      units='m/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_KS = var_cnt
+
+    call define_tavg_field(tavg_Ne_KB,'NEON_KB',2,              &
+      long_name='Ne transfer velocity for large bubbles', &
+      units='m/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_KB = var_cnt
+
+    call define_tavg_field(tavg_Ne_SURF_SAT,'NEON_SURF_SAT',2, &
+      long_name='Ne saturation',                                  &
+      units='mumol/m^3', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_SURF_SAT = var_cnt
+
+    call define_tavg_field(tavg_Ne_GAS_FLUX,'STF_NEON',2, &
+      long_name='Ne surface gas flux',                       &
+      units='mumol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_GAS_FLUX = var_cnt
+
+    call define_tavg_field(tavg_Ne_GAS_FLUX_DGE,'STF_NEON_DGE',2, &
+      long_name='Ne surface flux due to difusive gas exchange',      &
+      units='mumol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_GAS_FLUX_DGE = var_cnt
+
+    call define_tavg_field(tavg_Ne_GAS_FLUX_CTB,'STF_NEON_CTB',2, &
+      long_name='Ne surface flux due to completely trapped bubbles', &
+      units='mumol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_GAS_FLUX_CTB = var_cnt
+
+    call define_tavg_field(tavg_Ne_GAS_FLUX_PTB,'STF_NEON_PTB',2, &
+      long_name='Ne surface flux due to partially trapped bubbles',  &
+      units='mumol/m^2/s', grid_loc='2110')
+    var_cnt = var_cnt+1
+    bufind_Ne_GAS_FLUX_PTB = var_cnt
+
+    !-----------------------------------------------------------------------
+
     allocate(tr3he_SFLUX_TAVG(nx_block,ny_block,var_cnt,max_blocks_clinic))
     tr3he_SFLUX_TAVG = c0
 
@@ -918,11 +985,11 @@ contains
     SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
 
     ! !DESCRIPTION:
-    !  Compute tritium and helium surface fluxes and store related tavg
-    !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3 and
-    !  helium 4 are computed following Liang et al. GBC 27, 894-905 (2013)
+    !  Compute tritium, helium and neon surface fluxes and store related tavg
+    !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3,
+    !  helium 4 and neon are computed following Liang et al. GBC 27, 894-905 (2013)
     !  NOTE: the gas flux model uses mol/m^3 while CESM uses pmol/m^3 for helium 3
-    !  and mumol/m^3 for helium 4. So model helium 3 & helium 4 surface
+    !  and mumol/m^3 for helium 4 and neon. So model helium 3 & helium 4 surface
     !  concentrations are converted to mol/m^3, the gas fluxes are computed in
     !  mols/m^2/s and then converted to pmol/m^2/s and mumol/m^2/s.
 
@@ -972,7 +1039,8 @@ contains
     real (r8), dimension(nx_block,ny_block) :: &
       SURF_VAL,        & ! filtered surface tracer values
       SCHMIDT,         & ! gas Schmidt number
-      He4_SOL_0,       & ! solubility of helium 4 (pmol/m^3/Pa)
+      He4_SOL,         & ! solubility of helium 4 (mol/m^3/Pa)
+      Ne_SOL,        & ! solubility of neon (mol/m^3/Pa)
       SURF_SAT,        & ! gas surface saturation (pmol/m^3)
       GAS_PPATM,       & ! gas partial pressure in the atmosphere (Pa)
       He_ALPHA_SOL,    & ! temperature-dependent solubility fractionation
@@ -1144,7 +1212,9 @@ contains
       USTAR = calc_ustar(LAND_MASK(:,:,iblock), U10, RHO(:,:,iblock))
       CD    = calc_cdu10(LAND_MASK(:,:,iblock), U10)
 
-      He4_SOL_0 = he4_henry_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+      Ne_SOL = ne_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+        SSS(:,:,iblock))
+      He4_SOL = he4_henry_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
         SSS(:,:,iblock))
       He_ALPHA_SOL = alpha_sol_he(LAND_MASK(:,:,iblock), SST(:,:,iblock))
 
@@ -1158,7 +1228,7 @@ contains
 
         !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
         GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
-        SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
+        SURF_SAT = He4_SOL * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
         SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +                     &
           SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
         RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
@@ -1211,7 +1281,7 @@ contains
 
         !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
         GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
-        SURF_SAT = He4_SOL_0 * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
+        SURF_SAT = He4_SOL * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
         SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_inert_ind,iblock) +               &
           SURF_VALS_CUR(:,:,he3_inert_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
         RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
@@ -1264,7 +1334,7 @@ contains
 
         !---------- Diffusive gas exchange (mumol/m^3/s) -----------------------
         GAS_PPATM = Xhe * AP_USED(:,:,iblock)
-        SURF_SAT = He4_SOL_0 * GAS_PPATM ! mol/m^3
+        SURF_SAT = He4_SOL * GAS_PPATM ! mol/m^3
         SURF_VAL = p5*(SURF_VALS_OLD(:,:,he4_ind,iblock) +                     &
           SURF_VALS_CUR(:,:,he4_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
         RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
@@ -1305,6 +1375,59 @@ contains
         tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock)     = FLUX
       elsewhere
         STF_MODULE(:,:,he4_ind,iblock) = c0
+      endwhere
+
+      !-----------------------------------------------------------------------
+      !  Ne fluxes
+      !-----------------------------------------------------------------------
+
+      SCHMIDT = schmidt_ne(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+
+      where (LAND_MASK(:,:,iblock))
+
+        !---------- Diffusive gas exchange (mumol/m^3/s) -----------------------
+        GAS_PPATM = Xne * AP_USED(:,:,iblock)
+        SURF_SAT = Ne_SOL * GAS_PPATM ! mol/m^3
+        SURF_VAL = p5*(SURF_VALS_OLD(:,:,ne_ind,iblock) +                      &
+          SURF_VALS_CUR(:,:,ne_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
+        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
+          log(zw/deltaw)/kappa)
+        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
+          SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> mumol
+
+        !---------- Flux due to completely trapped bubbles (mumol/m^3/s) --------
+        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xne * 1.e+6_r8 ! mol -> mumol
+
+        !---------- Flux due to partially trapped bubbles (mumol/m^3/s) ---------
+        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
+        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+          - SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> pmol
+
+        !---------- equilibrium supersaturation (fraction) ---------------------
+        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+        !---------- Total gas flux ---------------------------------------------
+        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+        STF_MODULE(:,:,ne_ind,iblock) = FLUX
+
+        !-----------------------------------------------------------------------
+        ! store tavg
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock)      = SCHMIDT
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock)           = KS
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock)           = KB
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock) = FLUX_DGE
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock) = FLUX_CTB
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock) = FLUX_PTB
+        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock)     = FLUX
+      elsewhere
+        STF_MODULE(:,:,ne_ind,iblock) = c0
       endwhere
 
     end do
@@ -1360,7 +1483,7 @@ contains
     character(*), parameter :: &
       subname = 'tr3he_mod:tr3he_set_interior'
 
-    real (r8), parameter ::          &
+    real (r8), parameter ::         &
       spd    = 86400.0_r8,          & ! number of seconds in a day
       spy    = 365.0_r8*spd,        & ! number of seconds in a year
       hlife  = 12.31_r8,            & ! tritium half-life in years
@@ -1413,6 +1536,71 @@ contains
     !EOC
 
   end subroutine tr3he_set_interior
+
+  !***********************************************************************
+  !BOP
+  ! !IROUTINE: ne_sol_0
+  ! !INTERFACE:
+
+  function ne_sol_0(LAND_MASK, SST, SSS)
+
+    ! !DESCRIPTION:
+    !  Compute solubility for Ne in mol/(m^3 Pa)
+    !  (Hamme & Emerson, DSR I 51, 2004)
+    !
+    ! !REVISION HISTORY:
+    !  same as module
+
+    ! !USES:
+
+    ! !INPUT PARAMETERS:
+
+    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+      LAND_MASK          ! land mask for this block
+
+    real (r8), dimension(nx_block,ny_block), intent(in) :: &
+      SST,             & ! sea surface temperature (C)
+      SSS                ! sea surface salinity (psu)
+
+    ! !OUTPUT PARAMETERS:
+
+    real (r8), dimension(nx_block,ny_block) :: &
+      ne_sol_0           ! solubility of neon
+
+    !EOP
+    !BOC
+    !-----------------------------------------------------------------------
+    !  local variables
+    !-----------------------------------------------------------------------
+
+    real (r8), parameter :: &
+      A0  = 2.18156_r8,     &
+      A1  = 1.29108_r8,     &
+      A2  = 2.12504_r8,     &
+      A3  = c0,             &
+      B0  = -5.94737e-3_r8, &
+      B1  = -5.13896e-3_r8, &
+      B2  = c0
+
+    real (r8), dimension(nx_block,ny_block) :: &
+      Ts
+
+    !-----------------------------------------------------------------------
+    !  compute solubility
+    !-----------------------------------------------------------------------
+
+    where (LAND_MASK)
+      Ts = log((298.15_r8 - SST)/(273.15_r8 + SST))
+      ne_sol_0 = exp(A0 + A1*Ts + A2*Ts**2 + A3*Ts**3 + SSS*(B0 + B1*Ts + B2*Ts**2)) ! nmol/(kg atm)
+      ne_sol_0 = ne_sol_0 * 1.e-9 * rho_sw * c1000 / (Patm * Xne) ! nmol/(kg atm) -> mol/(m^3 Pa)
+    elsewhere
+      ne_sol_0 = c0
+    endwhere
+
+    !-----------------------------------------------------------------------
+    !EOC
+
+  end function ne_sol_0
 
   !***********************************************************************
   !BOP
@@ -1614,9 +1802,9 @@ contains
     !-----------------------------------------------------------------------
 
     real (r8), parameter :: &
-      A = 410.14_r8,      &
-      B = 20.503_r8,      &
-      C = 0.53175_r8,     &
+      A = 410.14_r8,        &
+      B = 20.503_r8,        &
+      C = 0.53175_r8,       &
       D = 0.0060111_r8
 
     !-----------------------------------------------------------------------
@@ -1631,6 +1819,59 @@ contains
     !EOC
 
   end function schmidt_he4
+
+  !***********************************************************************
+  !BOP
+  ! !IROUTINE: schmidt_ne
+  ! !INTERFACE:
+
+  function schmidt_ne(LAND_MASK, SST)
+
+    ! !DESCRIPTION:
+    !  Compute Schmidt number for neon (Wanninkhof 1992)
+    !
+    ! !REVISION HISTORY:
+    !  same as module
+
+    ! !USES:
+
+    ! !INPUT PARAMETERS:
+
+    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+      LAND_MASK          ! land mask for this block
+
+    real (r8), dimension(nx_block,ny_block), intent(in) :: &
+      SST                ! sea surface temperature (C)
+
+    ! !OUTPUT PARAMETERS:
+
+    real (r8), dimension(nx_block,ny_block) :: &
+      schmidt_ne       ! Schmidt number for neon
+
+    !EOP
+    !BOC
+    !-----------------------------------------------------------------------
+    !  local variables
+    !-----------------------------------------------------------------------
+
+    real (r8), parameter :: &
+      A = 855.1_r8,         &
+      B = 46.299_r8,        &
+      C = 1.254_r8,         &
+      D = 0.01449_r8
+
+    !-----------------------------------------------------------------------
+
+    where (LAND_MASK)
+      schmidt_ne = A - B*SST + C*SST**2 - D*SST**3
+    elsewhere
+      schmidt_ne = c0
+    endwhere
+
+    !-----------------------------------------------------------------------
+    !EOC
+
+  end function schmidt_ne
 
   !***********************************************************************
   !BOP
@@ -1668,8 +1909,8 @@ contains
     !-----------------------------------------------------------------------
 
     real (r8), parameter :: &
-      A = 818.e-9_r8,     &  ! m^2/s
-      E = 11.70e+3_r8        ! kJ/mol -> J/mol = (Pa*m^3)/mol
+      A = 818.e-9_r8,       & ! m^2/s
+      E = 11.70e+3_r8         ! kJ/mol -> J/mol = (Pa*m^3)/mol
 
     real (r8), dimension(nx_block,ny_block) :: &
       Tk                     ! sea surface temperature in Kelvin
@@ -1869,7 +2110,23 @@ contains
       call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock),       &
         tavg_4He_GAS_FLUX_CTB,iblock,1)
       call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock),       &
-        tavg_4He_GAS_FLUX_PTB,iblock,1)
+           tavg_4He_GAS_FLUX_PTB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock),             &
+        tavg_Ne_SCHMIDT,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock),                  &
+        tavg_Ne_KS,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock),                  &
+        tavg_Ne_KB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock),            &
+        tavg_Ne_SURF_SAT,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock),            &
+        tavg_Ne_GAS_FLUX,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock),        &
+        tavg_Ne_GAS_FLUX_DGE,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock),        &
+        tavg_Ne_GAS_FLUX_CTB,iblock,1)
+      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock),        &
+        tavg_Ne_GAS_FLUX_PTB,iblock,1)
     end do
 
     !$OMP END PARALLEL DO
