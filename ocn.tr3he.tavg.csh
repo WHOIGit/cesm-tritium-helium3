@@ -17,6 +17,7 @@ endif
 @ s1 = 1   # use base-model stream 1
 
 cat >! $CASEROOT/Buildconf/pop2conf/tr3he_tavg_contents << EOF
+$s1  SHUM
 $s1  TR3HE_IFRAC
 $s1  TR3HE_ATM_PRESS
 $s1  HELIUM3_KS
@@ -47,10 +48,22 @@ $s1  STF_NEON
 $s1  STF_NEON_DGE
 $s1  STF_NEON_CTB
 $s1  STF_NEON_PTB
+$s1  ARGON_KS
+$s1  ARGON_KB
+$s1  ARGON_SURF_SAT
+$s1  STF_ARGON
+$s1  STF_ARGON_DGE
+$s1  STF_ARGON_CTB
+$s1  STF_ARGON_PTB
+$s1  STF_TRITIUM_EVAP
+$s1  STF_TRITIUM_PREC
+$s1  STF_TRITIUM
+$s1  HQ
 $s1  HELIUM3
 $s1  INERT_HELIUM3
 $s1  HELIUM4
 $s1  NEON
+$s1  ARGON
 $s1  TRITIUM
 $s1  TRITIUM_DECAY
 EOF

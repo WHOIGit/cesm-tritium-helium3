@@ -2,2141 +2,2418 @@
 
 module tr3he_mod
 
-  !BOP
-  ! !MODULE: tr3he_mod
-  !
-  !  Module for tritium (3H) and helium 3 (3He)
-  !
-  !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-  !  Last modified on 2016-11-08 15:52
-  !
-  ! !DESCRIPTION:
-  !
-  ! !REVISION HISTORY:
-  !  SVN:$Id: $
+    !BOP
+    ! !MODULE: tr3he_mod
+    !
+    !  Module for tritium (3H) and helium 3 (3He)
+    !
+    !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
+    !  Last modified on Tue, 25 Jul 2017 10:09:35 -0400
+    !
+    ! !DESCRIPTION:
+    !
+    ! !REVISION HISTORY:
+    !  SVN:$Id: $
 
-  ! !USES:
+    ! !USES:
 
-  use POP_KindsMod
-  use POP_ErrorMod
+    use POP_KindsMod
+    use POP_ErrorMod
 
-  use kinds_mod
-  use blocks, only: nx_block, ny_block, block
-  use domain_size, only: max_blocks_clinic, km
-  use domain, only: nblocks_clinic, distrb_clinic
-  use exit_mod, only: sigAbort, exit_POP
-  use communicate, only: my_task, master_task
-  use constants
-  use io_types, only: stdout
-  use io_tools, only: document
-  use tavg, only: define_tavg_field, accumulate_tavg_field
-  use passive_tracer_tools, only: forcing_monthly_every_ts, &
-    ind_name_pair, tracer_read, read_field
-  use broadcast
-  use netcdf
+    use kinds_mod
+    use blocks, only: nx_block, ny_block, block
+    use domain_size, only: max_blocks_clinic, km
+    use domain, only: nblocks_clinic, distrb_clinic
+    use exit_mod, only: sigAbort, exit_POP
+    use communicate, only: my_task, master_task
+    use constants
+    use io_types, only: stdout
+    use io_tools, only: document
+    use tavg, only: define_tavg_field, accumulate_tavg_field
+    use passive_tracer_tools, only: forcing_monthly_every_ts, &
+            ind_name_pair, tracer_read, read_field
+    use broadcast
+    use netcdf
 
-  implicit none
-  save
+    implicit none
+    save
 
-  !-----------------------------------------------------------------------
-  !  public/private declarations
-  !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    !  public/private declarations
+    !-----------------------------------------------------------------------
 
-  private
+    private
 
-  ! !PUBLIC MEMBER FUNCTIONS:
+    ! !PUBLIC MEMBER FUNCTIONS:
 
-  public ::             &
-    tr3he_tracer_cnt,   &
-    tr3he_init,         &
-    tr3he_set_interior, &
-    tr3he_set_sflux,    &
-    tr3he_tavg_forcing
+    public ::                   &
+            tr3he_tracer_cnt,   &
+            tr3he_init,         &
+            tr3he_set_interior, &
+            tr3he_set_sflux,    &
+            tr3he_tavg_forcing
 
-  !EOP
-  !BOC
+    !EOP
+    !BOC
 
-  !-----------------------------------------------------------------------
-  !  module variables required by passive_tracers
-  !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    !  module variables required by passive_tracers
+    !-----------------------------------------------------------------------
 
-  integer (int_kind), parameter :: &
-    tr3he_tracer_cnt = 5
+    integer (int_kind), parameter :: &
+            tr3he_tracer_cnt = 6
 
-  !-----------------------------------------------------------------------
-  !  flags controlling which portion of code are executed
-  !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    !  flags controlling which portion of code are executed
+    !-----------------------------------------------------------------------
 
-  logical (log_kind) :: &
-    lflux_gas_3he      ! gas flux for helium 3
+    logical (log_kind) :: &
+            lflux_gas_3he      ! gas flux for helium 3
 
-  !-----------------------------------------------------------------------
-  !  relative tracer indices
-  !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    !  relative tracer indices
+    !-----------------------------------------------------------------------
 
-  integer (int_kind), parameter :: &
-    tr_ind        = 1, & ! tritium
-    he3_ind       = 2, & ! helium 3
-    he3_inert_ind = 3, & ! inert helium 3
-    he4_ind       = 4, & ! helium 4
-    ne_ind        = 5    ! neon
+    integer (int_kind), parameter :: &
+            tr_ind        = 1,       & ! tritium
+            he3_ind       = 2,       & ! helium 3
+            he3_inert_ind = 3,       & ! inert helium 3
+            he4_ind       = 4,       & ! helium 4
+            ne_ind        = 5,       & ! neon
+            ar_ind        = 6          ! argon
 
-  !-----------------------------------------------------------------------
-  !  gas flux parameters
-  !-----------------------------------------------------------------------
+    !-----------------------------------------------------------------------
+    !  gas flux parameters
+    !-----------------------------------------------------------------------
 
-  real (r8), parameter :: &
-    Xne    = 18.18e-6_r8, & ! Neon atmospheric mole fraction (mol/mol)
-    Xhe    = 5.24e-6_r8,  & ! atmospheric helium 4 mole fraction (mol/mol)
-    Ir     = 1.384e-6_r8, & ! 3He/4He isotopic ratio
-    R      = 8.314425_r8, & ! ideal gas constant in (m^3 Pa)/(K mol)
-    Patm   = 101325.0_r8, & ! standard atmospheric pressure in Pa
-    rhoair = 1.292_r8       ! density of air (kg/m^3)
+    real (r8), parameter ::           &
+            Xne    = 18.18e-6_r8,     & ! neon atmospheric mole fraction (mol/mol)
+            Xhe    = 5.24e-6_r8,      & ! helium 4 atmospheric mole fraction (mol/mol)
+            Xar    = 0.00934_r8,      & ! argon atmospheric mole fraction (mol/mol)
+            Ir     = 1.384e-6_r8,     & ! 3He/4He isotopic ratio
+            R      = 8.2057338e-5_r8, & ! ideal gas constant in (m^3 atm)/(K  mol)
+            Patm   = c1                 ! standard atmospheric pressure in atm
+            ! R      = 8.314425_r8,   & ! ideal gas constant in (m^3 Pa)/(K mol)
+            ! Patm   = 101325.0_r8      ! standard atmospheric pressure in Pa
 
+    !-----------------------------------------------------------------------
+    !  derived type & parameter for tracer index lookup
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  derived type & parameter for tracer index lookup
-  !-----------------------------------------------------------------------
+    type(ind_name_pair), dimension(tr3he_tracer_cnt) ::    &
+            ind_name_table = (/                            &
+            ind_name_pair(tr_ind,        'TRITIUM'),       &
+            ind_name_pair(he3_ind,       'HELIUM3'),       &
+            ind_name_pair(he3_inert_ind, 'INERT_HELIUM3'), &
+            ind_name_pair(he4_ind,       'HELIUM4'),       &
+            ind_name_pair(ne_ind,        'NEON'),          &
+            ind_name_pair(ar_ind,        'ARGON')/)
 
-  type(ind_name_pair), dimension(tr3he_tracer_cnt) :: &
-    ind_name_table = (/ &
-    ind_name_pair(tr_ind,        'TRITIUM'),       &
-    ind_name_pair(he3_ind,       'HELIUM3'),       &
-    ind_name_pair(he3_inert_ind, 'INERT_HELIUM3'), &
-    ind_name_pair(he4_ind,       'HELIUM4'),       &
-    ind_name_pair(ne_ind,        'NEON') /)
+    !-----------------------------------------------------------------------
+    !  mask that eases avoidance of computation over land
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  mask that eases avoidance of computation over land
-  !-----------------------------------------------------------------------
+    logical (log_kind), dimension(:,:,:), allocatable :: &
+            LAND_MASK
 
-  logical (log_kind), dimension(:,:,:), allocatable :: &
-    LAND_MASK
+    !-----------------------------------------------------------------------
+    !  forcing related variables
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  forcing related variables
-  !-----------------------------------------------------------------------
+    character(char_len) ::     &
+            tr3he_formulation, & ! how to calculate flux (file or model)
+            tritium_file         ! filename for atm tritium
 
-  character(char_len) :: &
-    tr3he_formulation,   & ! how to calculate flux (file or model)
-    tritium_file           ! filename for atm tritium
+    integer (int_kind) :: &
+            model_year,   & ! arbitrary model year
+            data_year       ! year in data that corresponds to model_year
 
-  integer (int_kind) ::  &
-    model_year,          & ! arbitrary model year
-    data_year              ! year in data that corresponds to model_year
+    real (r8), dimension(:,:,:,:), allocatable :: &
+            INTERP_WORK            ! temp array for interpolate_forcing output
 
-  real (r8), dimension(:,:,:,:), allocatable :: &
-    INTERP_WORK            ! temp array for interpolate_forcing output
+    type(forcing_monthly_every_ts) :: &
+            fice_file,                & ! ice fraction, if read from file
+            xkw_file,                 & ! a * wind-speed ** 2, if read from file
+            ap_file                     ! atmoshperic pressure, if read from file
 
-  type(forcing_monthly_every_ts) :: &
-    fice_file,           & ! ice fraction, if read from file
-    xkw_file,            & ! a * wind-speed ** 2, if read from file
-    ap_file                ! atmoshperic pressure, if read from file
+    !-----------------------------------------------------------------------
+    !  define tavg id for 2d fields related to surface fluxes
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  define tavg id for 2d fields related to surface fluxes
-  !-----------------------------------------------------------------------
+    real (r8), dimension(:,:,:,:), allocatable :: &
+            tr3he_SFLUX_TAVG
 
-  real (r8), dimension(:,:,:,:), allocatable ::   &
-    tr3he_SFLUX_TAVG
+    integer (int_kind) ::                                                &
+            tavg_tr3He_IFRAC,             bufind_tr3He_IFRAC,            & ! tavg id for ice fraction
+            tavg_tr3He_XKW,               bufind_tr3He_XKW,              & ! tavg id for xkw
+            tavg_tr3He_ATM_PRESS,         bufind_tr3He_ATM_PRESS,        & ! tavg id for atmospheric pressure
+            tavg_3He_SCHMIDT,             bufind_3He_SCHMIDT,            & ! tavg id for 3He Schmidt number
+            tavg_3He_KS,                  bufind_3He_KS,                 & ! tavg id for 3He transfer velocity for DGE
+            tavg_3He_KB,                  bufind_3He_KB,                 & ! tavg id for 3He transfer velocity for large bubbles
+            tavg_3He_SURF_SAT,            bufind_3He_SURF_SAT,           & ! tavg id for 3He surface saturation
+            tavg_3He_GAS_FLUX_DGE,        bufind_3He_GAS_FLUX_DGE,       & ! tavg id for 3He disusive gas exchange
+            tavg_3He_GAS_FLUX_CTB,        bufind_3He_GAS_FLUX_CTB,       & ! tavg id for 3He completely trapped bubbles
+            tavg_3He_GAS_FLUX_PTB,        bufind_3He_GAS_FLUX_PTB,       & ! tavg id for 3He partially trapped bubbles
+            tavg_3He_GAS_FLUX,            bufind_3He_GAS_FLUX,           & ! tavg id for 3He total gas flux
+            tavg_3He_inert_SCHMIDT,       bufind_3He_inert_SCHMIDT,      & ! tavg id for inert 3He Schmidt number
+            tavg_3He_inert_KS,            bufind_3He_inert_KS,           & ! tavg id for inert 3He transfer velocity for DGE
+            tavg_3He_inert_KB,            bufind_3He_inert_KB,           & ! tavg id for inert 3He transfer velocity for large bubbles
+            tavg_3He_inert_SURF_SAT,      bufind_3He_inert_SURF_SAT,     & ! tavg id for inert 3He surface saturation
+            tavg_3He_inert_GAS_FLUX_DGE,  bufind_3He_inert_GAS_FLUX_DGE, & ! tavg id for inert 3He disusive gas exchange
+            tavg_3He_inert_GAS_FLUX_CTB,  bufind_3He_inert_GAS_FLUX_CTB, & ! tavg id for inert 3He completely trapped bubbles
+            tavg_3He_inert_GAS_FLUX_PTB,  bufind_3He_inert_GAS_FLUX_PTB, & ! tavg id for inert 3He partially trapped bubbles
+            tavg_3He_inert_GAS_FLUX,      bufind_3He_inert_GAS_FLUX,     & ! tavg id for inert 3He total gas flux
+            tavg_4He_SCHMIDT,             bufind_4He_SCHMIDT,            & ! tavg id for 4He Schmidt number
+            tavg_4He_KS,                  bufind_4He_KS,                 & ! tavg id for 4He transfer velocity for DGE
+            tavg_4He_KB,                  bufind_4He_KB,                 & ! tavg id for 4He transfer velocity for large bubbles
+            tavg_4He_SURF_SAT,            bufind_4He_SURF_SAT,           & ! tavg id for 4He surface saturation
+            tavg_4He_GAS_FLUX_DGE,        bufind_4He_GAS_FLUX_DGE,       & ! tavg id for 4He disusive gas exchange
+            tavg_4He_GAS_FLUX_CTB,        bufind_4He_GAS_FLUX_CTB,       & ! tavg id for 4He completely trapped bubbles
+            tavg_4He_GAS_FLUX_PTB,        bufind_4He_GAS_FLUX_PTB,       & ! tavg id for 4He partially trapped bubbles
+            tavg_4He_GAS_FLUX,            bufind_4He_GAS_FLUX,           & ! tavg id for 4He total gas flux
+            tavg_Ne_SCHMIDT,              bufind_Ne_SCHMIDT,             & ! tavg id for Ne Schmidt number
+            tavg_Ne_KS,                   bufind_Ne_KS,                  & ! tavg id for Ne transfer velocity for DGE
+            tavg_Ne_KB,                   bufind_Ne_KB,                  & ! tavg id for Ne transfer velocity for large bubbles
+            tavg_Ne_SURF_SAT,             bufind_Ne_SURF_SAT,            & ! tavg id for Ne surface saturation
+            tavg_Ne_GAS_FLUX_DGE,         bufind_Ne_GAS_FLUX_DGE,        & ! tavg id for Ne disusive gas exchange
+            tavg_Ne_GAS_FLUX_CTB,         bufind_Ne_GAS_FLUX_CTB,        & ! tavg id for Ne completely trapped bubbles
+            tavg_Ne_GAS_FLUX_PTB,         bufind_Ne_GAS_FLUX_PTB,        & ! tavg id for Ne partially trapped bubbles
+            tavg_Ne_GAS_FLUX,             bufind_Ne_GAS_FLUX,            & ! tavg id for Ne total gas flux
+            tavg_Ar_SCHMIDT,              bufind_Ar_SCHMIDT,             & ! tavg id for Ar Schmidt number
+            tavg_Ar_KS,                   bufind_Ar_KS,                  & ! tavg id for Ar transfer velocity for DGE
+            tavg_Ar_KB,                   bufind_Ar_KB,                  & ! tavg id for Ar transfer velocity for large bubbles
+            tavg_Ar_SURF_SAT,             bufind_Ar_SURF_SAT,            & ! tavg id for Ar surface saturation
+            tavg_Ar_GAS_FLUX_DGE,         bufind_Ar_GAS_FLUX_DGE,        & ! tavg id for Ar disusive gas exchange
+            tavg_Ar_GAS_FLUX_CTB,         bufind_Ar_GAS_FLUX_CTB,        & ! tavg id for Ar completely trapped bubbles
+            tavg_Ar_GAS_FLUX_PTB,         bufind_Ar_GAS_FLUX_PTB,        & ! tavg id for Ar partially trapped bubbles
+            tavg_Ar_GAS_FLUX,             bufind_Ar_GAS_FLUX,            & ! tavg id for Ar total gas flux
+            tavg_Tr_FLUX_EVAP,            bufind_Tr_FLUX_EVAP,           & ! tavg id for tritium flux due to evaporation
+            tavg_Tr_FLUX_PREC,            bufind_Tr_FLUX_PREC,           & ! tavg id for tritium flux due to precipitation
+            tavg_Tr_FLUX,                 bufind_Tr_FLUX,                & ! tavg id for total tritium surface flux
+            tavg_HQ,                      bufind_HQ                        ! tavg id for ratio of abs humidities (QATM/QSAT)
 
-  integer (int_kind) :: &
-    tavg_tr3He_IFRAC,             bufind_tr3He_IFRAC,            & ! tavg id for ice fraction
-    tavg_tr3He_XKW,               bufind_tr3He_XKW,              & ! tavg id for xkw
-    tavg_tr3He_ATM_PRESS,         bufind_tr3He_ATM_PRESS,        & ! tavg id for atmospheric pressure
-    tavg_3He_SCHMIDT,             bufind_3He_SCHMIDT,            & ! tavg id for 3He Schmidt number
-    tavg_3He_KS,                  bufind_3He_KS,                 & ! tavg id for 3He transfer velocity for DGE
-    tavg_3He_KB,                  bufind_3He_KB,                 & ! tavg id for 3He transfer velocity for large bubbles
-    tavg_3He_SURF_SAT,            bufind_3He_SURF_SAT,           & ! tavg id for 3He surface saturation
-    tavg_3He_GAS_FLUX_DGE,        bufind_3He_GAS_FLUX_DGE,       & ! tavg id for 3He disusive gas exchange
-    tavg_3He_GAS_FLUX_CTB,        bufind_3He_GAS_FLUX_CTB,       & ! tavg id for 3He completely trapped bubbles
-    tavg_3He_GAS_FLUX_PTB,        bufind_3He_GAS_FLUX_PTB,       & ! tavg id for 3He partially trapped bubbles
-    tavg_3He_GAS_FLUX,            bufind_3He_GAS_FLUX,           & ! tavg id for 3He total gas flux
-    tavg_3He_inert_SCHMIDT,       bufind_3He_inert_SCHMIDT,      & ! tavg id for inert 3He Schmidt number
-    tavg_3He_inert_KS,            bufind_3He_inert_KS,           & ! tavg id for inert 3He transfer velocity for DGE
-    tavg_3He_inert_KB,            bufind_3He_inert_KB,           & ! tavg id for inert 3He transfer velocity for large bubbles
-    tavg_3He_inert_SURF_SAT,      bufind_3He_inert_SURF_SAT,     & ! tavg id for inert 3He surface saturation
-    tavg_3He_inert_GAS_FLUX_DGE,  bufind_3He_inert_GAS_FLUX_DGE, & ! tavg id for inert 3He disusive gas exchange
-    tavg_3He_inert_GAS_FLUX_CTB,  bufind_3He_inert_GAS_FLUX_CTB, & ! tavg id for inert 3He completely trapped bubbles
-    tavg_3He_inert_GAS_FLUX_PTB,  bufind_3He_inert_GAS_FLUX_PTB, & ! tavg id for inert 3He partially trapped bubbles
-    tavg_3He_inert_GAS_FLUX,      bufind_3He_inert_GAS_FLUX,     & ! tavg id for inert 3He total gas flux
-    tavg_4He_SCHMIDT,             bufind_4He_SCHMIDT,            & ! tavg id for 4He Schmidt number
-    tavg_4He_KS,                  bufind_4He_KS,                 & ! tavg id for 4He transfer velocity for DGE
-    tavg_4He_KB,                  bufind_4He_KB,                 & ! tavg id for 4He transfer velocity for large bubbles
-    tavg_4He_SURF_SAT,            bufind_4He_SURF_SAT,           & ! tavg id for 4He surface saturation
-    tavg_4He_GAS_FLUX_DGE,        bufind_4He_GAS_FLUX_DGE,       & ! tavg id for 4He disusive gas exchange
-    tavg_4He_GAS_FLUX_CTB,        bufind_4He_GAS_FLUX_CTB,       & ! tavg id for 4He completely trapped bubbles
-    tavg_4He_GAS_FLUX_PTB,        bufind_4He_GAS_FLUX_PTB,       & ! tavg id for 4He partially trapped bubbles
-    tavg_4He_GAS_FLUX,            bufind_4He_GAS_FLUX,           & ! tavg id for 4He total gas flux
-    tavg_Ne_SCHMIDT,              bufind_Ne_SCHMIDT,             & ! tavg id for Ne Schmidt number
-    tavg_Ne_KS,                   bufind_Ne_KS,                  & ! tavg id for Ne transfer velocity for DGE
-    tavg_Ne_KB,                   bufind_Ne_KB,                  & ! tavg id for Ne transfer velocity for large bubbles
-    tavg_Ne_SURF_SAT,             bufind_Ne_SURF_SAT,            & ! tavg id for Ne surface saturation
-    tavg_Ne_GAS_FLUX_DGE,         bufind_Ne_GAS_FLUX_DGE,        & ! tavg id for Ne disusive gas exchange
-    tavg_Ne_GAS_FLUX_CTB,         bufind_Ne_GAS_FLUX_CTB,        & ! tavg id for Ne completely trapped bubbles
-    tavg_Ne_GAS_FLUX_PTB,         bufind_Ne_GAS_FLUX_PTB,        & ! tavg id for Ne partially trapped bubbles
-    tavg_Ne_GAS_FLUX,             bufind_Ne_GAS_FLUX               ! tavg id for Ne total gas flux
+    !-----------------------------------------------------------------------
+    !  define tavg id for nonstandard 3d fields
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  define tavg id for nonstandard 3d fields
-  !-----------------------------------------------------------------------
+    integer (int_kind) :: &
+            tavg_TRITIUM_DECAY        ! tavg id for tritium decay
 
-  integer (int_kind) :: &
-    tavg_TRITIUM_DECAY        ! tavg id for tritium decay
+    !-----------------------------------------------------------------------
+    !  timers
+    !-----------------------------------------------------------------------
 
-  !-----------------------------------------------------------------------
-  !  timers
-  !-----------------------------------------------------------------------
+    integer (int_kind) :: tr3he_sflux_timer
 
-  integer (int_kind) :: tr3he_sflux_timer
-
-  !EOC
-  !***********************************************************************
+    !EOC
+    !***********************************************************************
 
 contains
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_init
-  ! !INTERFACE:
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_init
+    ! !INTERFACE:
 
-  subroutine tr3he_init(init_ts_file_fmt, read_restart_filename, &
-    TEMP3D, SALT3D, RHO3D, tracer_d_module, TRACER_MODULE, errorCode)
+    subroutine tr3he_init(init_ts_file_fmt, read_restart_filename, &
+            TEMP3D, SALT3D, RHO3D, tracer_d_module, TRACER_MODULE, errorCode)
 
-    ! !DESCRIPTION:
-    !  Initialize tr3he module. This involves setting metadata, reading
-    !  the modules namelist and setting initial conditions.
+        ! !DESCRIPTION:
+        !  Initialize tr3he module. This involves setting metadata, reading
+        !  the modules namelist and setting initial conditions.
 
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !USES:
+        ! !USES:
 
-    use prognostic, only: curtime, oldtime
-    use grid, only: KMT, n_topo_smooth, fill_points
-    use grid, only: REGION_MASK
-    use io_types, only: nml_in, nml_filename
-    use prognostic, only: tracer_field
-    use timers, only: get_timer
-    use passive_tracer_tools, only: init_forcing_monthly_every_ts, &
-      rest_read_tracer_block, file_read_tracer_block
+        use prognostic, only: curtime, oldtime
+        use grid, only: KMT, n_topo_smooth, fill_points
+        use grid, only: REGION_MASK
+        use io_types, only: nml_in, nml_filename
+        use prognostic, only: tracer_field
+        use timers, only: get_timer
+        use passive_tracer_tools, only: init_forcing_monthly_every_ts, &
+                rest_read_tracer_block, file_read_tracer_block
 
-    ! !INPUT PARAMETERS:
+        ! !INPUT PARAMETERS:
 
-    character (*), intent(in) ::  &
-      init_ts_file_fmt,    & ! format (bin or nc) for input file
-      read_restart_filename  ! file name for restart file
+        character (*), intent(in) ::  &
+                init_ts_file_fmt,     & ! format (bin or nc) for input file
+                read_restart_filename   ! file name for restart file
 
-    real (r8), dimension(nx_block,ny_block,km,max_blocks_clinic), &
-      intent(in) :: TEMP3D, SALT3D, RHO3D
+        real (r8), dimension(nx_block,ny_block,km,max_blocks_clinic), &
+                intent(in) :: TEMP3D, SALT3D, RHO3D
 
-    ! !INPUT/OUTPUT PARAMETERS:
+        ! !INPUT/OUTPUT PARAMETERS:
 
-    type (tracer_field), dimension(tr3he_tracer_cnt), intent(inout) :: &
-      tracer_d_module   ! descriptors for each tracer
+        type (tracer_field), dimension(tr3he_tracer_cnt), intent(inout) :: &
+                tracer_d_module   ! descriptors for each tracer
 
-    real (r8), dimension(nx_block,ny_block,km,tr3he_tracer_cnt,3,max_blocks_clinic), &
-      intent(inout) :: TRACER_MODULE
+        real (r8), dimension(nx_block,ny_block,km,tr3he_tracer_cnt,3,max_blocks_clinic), &
+                intent(inout) :: TRACER_MODULE
 
-    ! !OUTPUT PARAMETERS:
+        ! !OUTPUT PARAMETERS:
 
-    integer (POP_i4), intent(out) :: &
-      errorCode         ! returned error code
+        integer (POP_i4), intent(out) :: &
+                errorCode         ! returned error code
 
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    character(*), parameter :: sub_name = 'tr3he_mod:tr3he_init'
+        character(*), parameter :: sub_name = 'tr3he_mod:tr3he_init'
 
-    character(char_len) ::      &
-      init_tr3he_option,        & ! option for initialization of bgc
-      init_tr3he_init_file,     & ! filename for option 'file'
-      init_tr3he_init_file_fmt    ! file format for option 'file'
+        character(char_len) ::           &
+                init_tr3he_option,       & ! option for initialization of bgc
+                init_tr3he_init_file,    & ! filename for option 'file'
+                init_tr3he_init_file_fmt    ! file format for option 'file'
 
-    integer (int_kind) ::     &
-      n,                      & ! index for looping over tracers
-      k,                      & ! index for looping over depth levels
-      iblock,                 & ! index for looping over blocks
-      nml_error                 ! namelist i/o error flag
+        integer (int_kind) :: &
+                n,            & ! index for looping over tracers
+                k,            & ! index for looping over depth levels
+                iblock,       & ! index for looping over blocks
+                nml_error       ! namelist i/o error flag
 
-    type(tracer_read), dimension(tr3he_tracer_cnt) :: &
-      tracer_init_ext           ! namelist variable for initializing tracers
+        type(tracer_read), dimension(tr3he_tracer_cnt) :: &
+                tracer_init_ext           ! namelist variable for initializing tracers
 
-    type(tracer_read) ::      &
-      gas_flux_fice,          & ! ice fraction for gas fluxes
-      gas_flux_ws,            & ! wind speed for gas fluxes
-      gas_flux_ap               ! atmospheric pressure for gas fluxes
+        type(tracer_read) ::   &
+                gas_flux_fice, & ! ice fraction for gas fluxes
+                gas_flux_ws,   & ! wind speed for gas fluxes
+                gas_flux_ap      ! atmospheric pressure for gas fluxes
 
-    namelist /tr3he_nml/ &
-      init_tr3he_option, init_tr3he_init_file, init_tr3he_init_file_fmt, &
-      tracer_init_ext, tritium_file, model_year, data_year, &
-      tr3he_formulation, gas_flux_fice, gas_flux_ws, gas_flux_ap
+        namelist /tr3he_nml/                                                       &
+                init_tr3he_option, init_tr3he_init_file, init_tr3he_init_file_fmt, &
+                tracer_init_ext, tritium_file, model_year, data_year,              &
+                tr3he_formulation, gas_flux_fice, gas_flux_ws, gas_flux_ap
 
-    character (char_len) ::  &
-      tr3he_restart_filename      ! modified file name for restart file
+        character (char_len) ::  &
+                tr3he_restart_filename      ! modified file name for restart file
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      GAS_SOL_0,   & ! solubility of helium 4 (pmol/m^3/Pa)
-      ALPHA_SOL,   & ! temperature-dependent solubility fractionation
-      He4_SAT,     & ! helium 4 saturation
-      He3_SAT        ! helium 3 saturation
+        real (r8), dimension(nx_block,ny_block) :: &
+                GAS_SOL_0,                         & ! solubility of helium 4 (mol/m^3/atm)
+                ALPHA_SOL,                         & ! temperature-dependent solubility fractionation
+                He4_SAT,                           & ! helium 4 saturation
+                He3_SAT                              ! helium 3 saturation
 
-    logical (log_kind), dimension(nx_block,ny_block) ::  LAND_MASK_k
+        logical (log_kind), dimension(nx_block,ny_block) ::  LAND_MASK_k
 
-    !-----------------------------------------------------------------------
-    !  initialize forcing_monthly_every_ts variables
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !  initialize forcing_monthly_every_ts variables
+        !-----------------------------------------------------------------------
 
-    errorCode = POP_Success
+        errorCode = POP_Success
 
-    call init_forcing_monthly_every_ts(fice_file)
-    call init_forcing_monthly_every_ts(xkw_file)
-    call init_forcing_monthly_every_ts(ap_file)
+        call init_forcing_monthly_every_ts(fice_file)
+        call init_forcing_monthly_every_ts(xkw_file)
+        call init_forcing_monthly_every_ts(ap_file)
 
-    !-----------------------------------------------------------------------
-    !  initialize tracer_d values
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !  initialize tracer_d values
+        !-----------------------------------------------------------------------
 
-    tracer_d_module(tr_ind)%long_name        = 'tritium'
-    tracer_d_module(he3_ind)%long_name       = 'helium 3'
-    tracer_d_module(he3_inert_ind)%long_name = 'inert helium 3'
-    do n = 1, tr3he_tracer_cnt - 1
-      tracer_d_module(n)%short_name = ind_name_table(n)%name
-      tracer_d_module(n)%units      = 'pmol/m^3'
-      tracer_d_module(n)%tend_units = 'pmol/m^3'
-      tracer_d_module(n)%flux_units = 'pmol/m^2/s'
-    end do
+        tracer_d_module(tr_ind)%long_name        = 'tritium'
+        tracer_d_module(he3_ind)%long_name       = 'helium 3'
+        tracer_d_module(he3_inert_ind)%long_name = 'inert helium 3'
+        do n = 1, tr3he_tracer_cnt - 1
+            tracer_d_module(n)%short_name = ind_name_table(n)%name
+            tracer_d_module(n)%units      = 'pmol/m^3'
+            tracer_d_module(n)%tend_units = 'pmol/m^3'
+            tracer_d_module(n)%flux_units = 'pmol/m^2/s'
+        end do
 
-    tracer_d_module(he4_ind)%long_name  = 'helium 4'
-    tracer_d_module(he4_ind)%short_name = ind_name_table(he4_ind)%name
-    tracer_d_module(he4_ind)%units      = 'mumol/m^3'
-    tracer_d_module(he4_ind)%tend_units = 'mumol/m^3'
-    tracer_d_module(he4_ind)%flux_units = 'mumol/m^2/s'
+        tracer_d_module(he4_ind)%long_name  = 'helium 4'
+        tracer_d_module(he4_ind)%short_name = ind_name_table(he4_ind)%name
+        tracer_d_module(he4_ind)%units      = 'mumol/m^3'
+        tracer_d_module(he4_ind)%tend_units = 'mumol/m^3'
+        tracer_d_module(he4_ind)%flux_units = 'mumol/m^2/s'
 
-    tracer_d_module(ne_ind)%long_name  = 'neon'
-    tracer_d_module(ne_ind)%short_name = ind_name_table(ne_ind)%name
-    tracer_d_module(ne_ind)%units      = 'mumol/m^3'
-    tracer_d_module(ne_ind)%tend_units = 'mumol/m^3'
-    tracer_d_module(ne_ind)%flux_units = 'mumol/m^2/s'
+        tracer_d_module(ne_ind)%long_name  = 'neon'
+        tracer_d_module(ne_ind)%short_name = ind_name_table(ne_ind)%name
+        tracer_d_module(ne_ind)%units      = 'mumol/m^3'
+        tracer_d_module(ne_ind)%tend_units = 'mumol/m^3'
+        tracer_d_module(ne_ind)%flux_units = 'mumol/m^2/s'
 
-    !-----------------------------------------------------------------------
-    !  default namelist settings
-    !-----------------------------------------------------------------------
+        tracer_d_module(ar_ind)%long_name  = 'argon'
+        tracer_d_module(ar_ind)%short_name = ind_name_table(ar_ind)%name
+        tracer_d_module(ar_ind)%units      = 'mmol/m^3'
+        tracer_d_module(ar_ind)%tend_units = 'mmol/m^3'
+        tracer_d_module(ar_ind)%flux_units = 'mmol/m^2/s'
 
-    init_tr3he_option        = 'unknown'
-    init_tr3he_init_file     = 'unknown'
-    init_tr3he_init_file_fmt = 'bin'
+        !-----------------------------------------------------------------------
+        !  default namelist settings
+        !-----------------------------------------------------------------------
 
-    do n = 1, tr3he_tracer_cnt
-      tracer_init_ext(n)%mod_varname  = 'unknown'
-      tracer_init_ext(n)%filename     = 'unknown'
-      tracer_init_ext(n)%file_varname = 'unknown'
-      tracer_init_ext(n)%scale_factor = c1
-      tracer_init_ext(n)%default_val  = c0
-      tracer_init_ext(n)%file_fmt     = 'bin'
-    end do
+        init_tr3he_option        = 'unknown'
+        init_tr3he_init_file     = 'unknown'
+        init_tr3he_init_file_fmt = 'bin'
 
-    tritium_file      = 'unknown'
-    model_year        = 1
-    data_year         = 1931
-    tr3he_formulation = 'model'
-
-    gas_flux_fice%filename     = 'unknown'
-    gas_flux_fice%file_varname = 'FICE'
-    gas_flux_fice%scale_factor = c1
-    gas_flux_fice%default_val  = c0
-    gas_flux_fice%file_fmt     = 'bin'
-
-    gas_flux_ws%filename     = 'unknown'
-    gas_flux_ws%file_varname = 'XKW'
-    gas_flux_ws%scale_factor = c1
-    gas_flux_ws%default_val  = c0
-    gas_flux_ws%file_fmt     = 'bin'
-
-    gas_flux_ap%filename     = 'unknown'
-    gas_flux_ap%file_varname = 'P'
-    gas_flux_ap%scale_factor = c1
-    gas_flux_ap%default_val  = c0
-    gas_flux_ap%file_fmt     = 'bin'
-
-    if (my_task == master_task) then
-      open (nml_in, file=nml_filename, status='old',iostat=nml_error)
-      if (nml_error /= 0) then
-        nml_error = -1
-      else
-        nml_error =  1
-      endif
-      do while (nml_error > 0)
-        read(nml_in, nml=tr3he_nml,iostat=nml_error)
-      end do
-      if (nml_error == 0) close(nml_in)
-    endif
-
-    call broadcast_scalar(nml_error, master_task)
-    if (nml_error /= 0) then
-      call document(sub_name, 'tr3he_nml not found')
-      call exit_POP(sigAbort, 'stopping in ' /&
-        &/ sub_name)
-    endif
-
-    !-----------------------------------------------------------------------
-    !  broadcast all namelist variables
-    !-----------------------------------------------------------------------
-
-    call broadcast_scalar(init_tr3he_option, master_task)
-    call broadcast_scalar(init_tr3he_init_file, master_task)
-    call broadcast_scalar(init_tr3he_init_file_fmt, master_task)
-
-    do n = 1, tr3he_tracer_cnt
-      call broadcast_scalar(tracer_init_ext(n)%mod_varname, master_task)
-      call broadcast_scalar(tracer_init_ext(n)%filename, master_task)
-      call broadcast_scalar(tracer_init_ext(n)%file_varname, master_task)
-      call broadcast_scalar(tracer_init_ext(n)%scale_factor, master_task)
-      call broadcast_scalar(tracer_init_ext(n)%default_val, master_task)
-      call broadcast_scalar(tracer_init_ext(n)%file_fmt, master_task)
-    end do
-
-    call broadcast_scalar(tritium_file, master_task)
-    call broadcast_scalar(model_year, master_task)
-    call broadcast_scalar(data_year, master_task)
-    call broadcast_scalar(tr3he_formulation, master_task)
-
-    call broadcast_scalar(gas_flux_fice%filename, master_task)
-    call broadcast_scalar(gas_flux_fice%file_varname, master_task)
-    call broadcast_scalar(gas_flux_fice%scale_factor, master_task)
-    call broadcast_scalar(gas_flux_fice%default_val, master_task)
-    call broadcast_scalar(gas_flux_fice%file_fmt, master_task)
-
-    fice_file%input = gas_flux_fice
-
-    call broadcast_scalar(gas_flux_ws%filename, master_task)
-    call broadcast_scalar(gas_flux_ws%file_varname, master_task)
-    call broadcast_scalar(gas_flux_ws%scale_factor, master_task)
-    call broadcast_scalar(gas_flux_ws%default_val, master_task)
-    call broadcast_scalar(gas_flux_ws%file_fmt, master_task)
-
-    xkw_file%input = gas_flux_ws
-
-    call broadcast_scalar(gas_flux_ap%filename, master_task)
-    call broadcast_scalar(gas_flux_ap%file_varname, master_task)
-    call broadcast_scalar(gas_flux_ap%scale_factor, master_task)
-    call broadcast_scalar(gas_flux_ap%default_val, master_task)
-    call broadcast_scalar(gas_flux_ap%file_fmt, master_task)
-
-    ap_file%input = gas_flux_ap
-
-    !-----------------------------------------------------------------------
-    !   initialize tracers
-    !-----------------------------------------------------------------------
-
-    select case (init_tr3he_option)
-
-    case ('zero', 'ccsm_startup_spunup')
-      TRACER_MODULE = c0
-      if (my_task == master_task) then
-        write(stdout,delim_fmt)
-        write(stdout,*) ' Initial 3-d tritium and 3He set to all zeros'
-        write(stdout,delim_fmt)
-      endif
-
-    case ('restart', 'ccsm_continue', 'ccsm_branch', 'ccsm_hybrid' )
-
-      tr3he_restart_filename = char_blank
-
-      if (init_tr3he_init_file == 'same_as_TS') then
-        if (read_restart_filename == 'undefined') then
-          call document(sub_name, 'no restart file to read tritium and 3He from')
-          call exit_POP(sigAbort, 'stopping in ' /&
-            &/ sub_name)
-        endif
-        tr3he_restart_filename = read_restart_filename
-        init_tr3he_init_file_fmt = init_ts_file_fmt
-
-      else  ! do not read from TS restart file
-
-        tr3he_restart_filename = trim(init_tr3he_init_file)
-
-      endif
-
-      call rest_read_tracer_block(init_tr3he_init_file_fmt, &
-        tr3he_restart_filename, &
-        tracer_d_module,        &
-        TRACER_MODULE)
-
-    case ('file', 'ccsm_startup')
-
-      call document(sub_name, 'tritium and 3He being read from separate file')
-
-      call file_read_tracer_block(init_tr3he_init_file_fmt, &
-        init_tr3he_init_file,   &
-        tracer_d_module,        &
-        ind_name_table,         &
-        tracer_init_ext,        &
-        TRACER_MODULE)
-
-      if (n_topo_smooth > 0) then
         do n = 1, tr3he_tracer_cnt
-          do k = 1, km
-            call fill_points(k,TRACER_MODULE(:,:,k,n,curtime,:), errorCode)
-            if (errorCode /= POP_Success) then
-              call POP_ErrorSet(errorCode, &
-                'tr3he_init: error in fill_points')
-              return
+            tracer_init_ext(n)%mod_varname  = 'unknown'
+            tracer_init_ext(n)%filename     = 'unknown'
+            tracer_init_ext(n)%file_varname = 'unknown'
+            tracer_init_ext(n)%scale_factor = c1
+            tracer_init_ext(n)%default_val  = c0
+            tracer_init_ext(n)%file_fmt     = 'bin'
+        end do
+
+        tritium_file      = 'unknown'
+        model_year        = 1
+        data_year         = 1931
+        tr3he_formulation = 'model'
+
+        gas_flux_fice%filename     = 'unknown'
+        gas_flux_fice%file_varname = 'FICE'
+        gas_flux_fice%scale_factor = c1
+        gas_flux_fice%default_val  = c0
+        gas_flux_fice%file_fmt     = 'bin'
+
+        gas_flux_ws%filename     = 'unknown'
+        gas_flux_ws%file_varname = 'XKW'
+        gas_flux_ws%scale_factor = c1
+        gas_flux_ws%default_val  = c0
+        gas_flux_ws%file_fmt     = 'bin'
+
+        gas_flux_ap%filename     = 'unknown'
+        gas_flux_ap%file_varname = 'P'
+        gas_flux_ap%scale_factor = c1
+        gas_flux_ap%default_val  = c0
+        gas_flux_ap%file_fmt     = 'bin'
+
+        if (my_task == master_task) then
+            open (nml_in, file=nml_filename, status='old',iostat=nml_error)
+            if (nml_error /= 0) then
+                nml_error = -1
+            else
+                nml_error =  1
             endif
-          end do
+            do while (nml_error > 0)
+                read(nml_in, nml=tr3he_nml,iostat=nml_error)
+            end do
+            if (nml_error == 0) close(nml_in)
+        endif
+
+        call broadcast_scalar(nml_error, master_task)
+        if (nml_error /= 0) then
+            call document(sub_name, 'tr3he_nml not found')
+            call exit_POP(sigAbort, 'stopping in ' /&
+                    &/ sub_name)
+        endif
+
+        !-----------------------------------------------------------------------
+        !  broadcast all namelist variables
+        !-----------------------------------------------------------------------
+
+        call broadcast_scalar(init_tr3he_option, master_task)
+        call broadcast_scalar(init_tr3he_init_file, master_task)
+        call broadcast_scalar(init_tr3he_init_file_fmt, master_task)
+
+        do n = 1, tr3he_tracer_cnt
+            call broadcast_scalar(tracer_init_ext(n)%mod_varname, master_task)
+            call broadcast_scalar(tracer_init_ext(n)%filename, master_task)
+            call broadcast_scalar(tracer_init_ext(n)%file_varname, master_task)
+            call broadcast_scalar(tracer_init_ext(n)%scale_factor, master_task)
+            call broadcast_scalar(tracer_init_ext(n)%default_val, master_task)
+            call broadcast_scalar(tracer_init_ext(n)%file_fmt, master_task)
         end do
-      endif
 
-    case ('saturation')
+        call broadcast_scalar(tritium_file, master_task)
+        call broadcast_scalar(model_year, master_task)
+        call broadcast_scalar(data_year, master_task)
+        call broadcast_scalar(tr3he_formulation, master_task)
 
-      if (my_task == master_task) then
-          write(stdout,delim_fmt)
-          write(stdout,*) ' Initial 3-d 3He set to saturation concentration'
-          write(stdout,delim_fmt)
-      endif
+        call broadcast_scalar(gas_flux_fice%filename, master_task)
+        call broadcast_scalar(gas_flux_fice%file_varname, master_task)
+        call broadcast_scalar(gas_flux_fice%scale_factor, master_task)
+        call broadcast_scalar(gas_flux_fice%default_val, master_task)
+        call broadcast_scalar(gas_flux_fice%file_fmt, master_task)
 
-      do iblock = 1, nblocks_clinic
-        do k = 1, km
-          LAND_MASK_k = merge(.true., .false., k <= KMT(:,:,iblock))
-          ! tritium
-          TRACER_MODULE(:,:,k,tr_ind,oldtime,iblock) = c0
-          TRACER_MODULE(:,:,k,tr_ind,curtime,iblock) = c0
-          ! helium 3
-          GAS_SOL_0 = he4_henry_sol_0(LAND_MASK_k, TEMP3D(:,:,k,iblock),    &
-            SALT3D(:,:,k,iblock))
-          ALPHA_SOL = alpha_sol_he(LAND_MASK_k, TEMP3D(:,:,k,iblock))
-          He4_SAT = GAS_SOL_0 * Xhe * Patm   * 1.e+6_r8 ! mol/m^3 -> mumol/m^3
-          He3_SAT = He4_SAT * Ir * ALPHA_SOL * 1.e+6_r8 ! mumol/m^3 -> pmol/m^3
-          TRACER_MODULE(:,:,k,he3_ind,oldtime,iblock) = He3_SAT
-          TRACER_MODULE(:,:,k,he3_ind,curtime,iblock) = He3_SAT
+        fice_file%input = gas_flux_fice
+
+        call broadcast_scalar(gas_flux_ws%filename, master_task)
+        call broadcast_scalar(gas_flux_ws%file_varname, master_task)
+        call broadcast_scalar(gas_flux_ws%scale_factor, master_task)
+        call broadcast_scalar(gas_flux_ws%default_val, master_task)
+        call broadcast_scalar(gas_flux_ws%file_fmt, master_task)
+
+        xkw_file%input = gas_flux_ws
+
+        call broadcast_scalar(gas_flux_ap%filename, master_task)
+        call broadcast_scalar(gas_flux_ap%file_varname, master_task)
+        call broadcast_scalar(gas_flux_ap%scale_factor, master_task)
+        call broadcast_scalar(gas_flux_ap%default_val, master_task)
+        call broadcast_scalar(gas_flux_ap%file_fmt, master_task)
+
+        ap_file%input = gas_flux_ap
+
+        !-----------------------------------------------------------------------
+        !   initialize tracers
+        !-----------------------------------------------------------------------
+
+        select case (init_tr3he_option)
+
+        case ('zero', 'ccsm_startup_spunup')
+            TRACER_MODULE = c0
+            if (my_task == master_task) then
+                write(stdout,delim_fmt)
+                write(stdout,*) ' Initial 3-d tritium and 3He set to all zeros'
+                write(stdout,delim_fmt)
+            endif
+
+        case ('restart', 'ccsm_continue', 'ccsm_branch', 'ccsm_hybrid' )
+
+            tr3he_restart_filename = char_blank
+
+            if (init_tr3he_init_file == 'same_as_TS') then
+                if (read_restart_filename == 'undefined') then
+                    call document(sub_name, 'no restart file to read tritium and 3He from')
+                    call exit_POP(sigAbort, 'stopping in ' /&
+                            &/ sub_name)
+                endif
+                tr3he_restart_filename = read_restart_filename
+                init_tr3he_init_file_fmt = init_ts_file_fmt
+
+            else  ! do not read from TS restart file
+
+                tr3he_restart_filename = trim(init_tr3he_init_file)
+
+            endif
+
+            call rest_read_tracer_block(init_tr3he_init_file_fmt, &
+                    tr3he_restart_filename,                       &
+                    tracer_d_module,                              &
+                    TRACER_MODULE)
+
+        case ('file', 'ccsm_startup')
+
+            call document(sub_name, 'tritium and 3He being read from separate file')
+
+            call file_read_tracer_block(init_tr3he_init_file_fmt, &
+                    init_tr3he_init_file,                         &
+                    tracer_d_module,                              &
+                    ind_name_table,                               &
+                    tracer_init_ext,                              &
+                    TRACER_MODULE)
+
+            if (n_topo_smooth > 0) then
+                do n = 1, tr3he_tracer_cnt
+                    do k = 1, km
+                        call fill_points(k,TRACER_MODULE(:,:,k,n,curtime,:), errorCode)
+                        if (errorCode /= POP_Success) then
+                            call POP_ErrorSet(errorCode, &
+                                    'tr3he_init: error in fill_points')
+                            return
+                        endif
+                    end do
+                end do
+            endif
+
+        case ('saturation')
+
+            if (my_task == master_task) then
+                write(stdout,delim_fmt)
+                write(stdout,*) ' Initial 3-d 3He set to saturation concentration'
+                write(stdout,delim_fmt)
+            endif
+
+            do iblock = 1, nblocks_clinic
+                do k = 1, km
+                    LAND_MASK_k = merge(.true., .false., k <= KMT(:,:,iblock))
+                    ! tritium
+                    TRACER_MODULE(:,:,k,tr_ind,oldtime,iblock) = c0
+                    TRACER_MODULE(:,:,k,tr_ind,curtime,iblock) = c0
+                    ! helium 3
+                    GAS_SOL_0 = he4_sol_0(LAND_MASK_k, TEMP3D(:,:,k,iblock), &
+                            SALT3D(:,:,k,iblock), RHO3D(:,:,k,iblock))
+                    ALPHA_SOL = alpha_sol_he(LAND_MASK_k, TEMP3D(:,:,k,iblock))
+                    He4_SAT = GAS_SOL_0                * 1.e+6_r8 ! mol/m^3 -> mumol/m^3
+                    He3_SAT = He4_SAT * Ir * ALPHA_SOL * 1.e+6_r8 ! mumol/m^3 -> pmol/m^3
+                    TRACER_MODULE(:,:,k,he3_ind,oldtime,iblock) = He3_SAT
+                    TRACER_MODULE(:,:,k,he3_ind,curtime,iblock) = He3_SAT
+                end do
+            end do
+
+            if (my_task == master_task) then
+                write(stdout,delim_fmt)
+                write(stdout,*) ' Initialization of 3-d 3He complete'
+                write(stdout,delim_fmt)
+            endif
+
+        case default
+            call document(sub_name, 'init_tr3he_option', init_tr3he_option)
+            call exit_POP(sigAbort, 'unknown init_tr3he_option')
+
+        end select
+
+        !-----------------------------------------------------------------------
+        !  apply land mask to tracers
+        !-----------------------------------------------------------------------
+
+        do iblock = 1, nblocks_clinic
+            do n = 1, tr3he_tracer_cnt
+                do k = 1, km
+                    where (k > KMT(:,:,iblock))
+                        TRACER_MODULE(:,:,k,n,curtime,iblock) = c0
+                        TRACER_MODULE(:,:,k,n,oldtime,iblock) = c0
+                    end where
+                end do
+            end do
         end do
-      end do
 
-      if (my_task == master_task) then
-          write(stdout,delim_fmt)
-          write(stdout,*) ' Initialization of 3-d 3He complete'
-          write(stdout,delim_fmt)
-      endif
+        !-----------------------------------------------------------------------
+        !  allocate and initialize LAND_MASK (true for ocean points)
+        !-----------------------------------------------------------------------
 
-    case default
-      call document(sub_name, 'init_tr3he_option', init_tr3he_option)
-      call exit_POP(sigAbort, 'unknown init_tr3he_option')
+        allocate( LAND_MASK(nx_block,ny_block,max_blocks_clinic) )
+        LAND_MASK = (KMT.gt.0)
 
-    end select
+        call get_timer(tr3he_sflux_timer, 'tr3he_SFLUX', 1, distrb_clinic%nprocs)
 
-    !-----------------------------------------------------------------------
-    !  apply land mask to tracers
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !  call other initialization subroutines
+        !-----------------------------------------------------------------------
 
-    do iblock = 1, nblocks_clinic
-      do n = 1, tr3he_tracer_cnt
-        do k = 1, km
-          where (k > KMT(:,:,iblock))
-            TRACER_MODULE(:,:,k,n,curtime,iblock) = c0
-            TRACER_MODULE(:,:,k,n,oldtime,iblock) = c0
-          end where
+        call tr3he_init_tavg
+        call tr3he_init_sflux
+
+        !-----------------------------------------------------------------------
+        !EOC
+
+    end subroutine tr3he_init
+
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_init_tavg
+    ! !INTERFACE:
+
+    subroutine tr3he_init_tavg
+
+        ! !DESCRIPTION:
+        !  Define tavg fields not automatically handled by the base model.
+
+        ! !REVISION HISTORY:
+        !  same as module
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        integer (int_kind) :: &
+                var_cnt             ! how many tavg variables are defined
+
+        !-----------------------------------------------------------------------
+        !  2D fields related to surface fluxes
+        !-----------------------------------------------------------------------
+
+        var_cnt = 0
+
+        call define_tavg_field(tavg_tr3He_IFRAC,'TR3HE_IFRAC',2, &
+                long_name='Ice fraction for 3He fluxes',         &
+                units='fraction', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_tr3He_IFRAC = var_cnt
+
+        call define_tavg_field(tavg_tr3He_XKW,'TR3HE_XKW',2, &
+                long_name='XKW for 3He fluxes',              &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_tr3He_XKW = var_cnt
+
+        call define_tavg_field(tavg_tr3He_ATM_PRESS,'TR3HE_ATM_PRESS',2, &
+                long_name='Atmospheric pressure for 3He fluxes',         &
+                units='atm', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_tr3He_ATM_PRESS = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_3He_SCHMIDT,'HELIUM3_SCHMIDT',2, &
+                long_name='3He Schmidt number',                      &
+                units='none', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_SCHMIDT = var_cnt
+
+        call define_tavg_field(tavg_3He_KS,'HELIUM3_KS',2,                    &
+                long_name='3He transfer velocity for diffusive gas exchange', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_KS = var_cnt
+
+        call define_tavg_field(tavg_3He_KB,'HELIUM3_KB',2,           &
+                long_name='3He transfer velocity for large bubbles', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_KB = var_cnt
+
+        call define_tavg_field(tavg_3He_SURF_SAT,'HELIUM3_SURF_SAT',2, &
+                long_name='3He saturation',                            &
+                units='pmol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_SURF_SAT = var_cnt
+
+        call define_tavg_field(tavg_3He_GAS_FLUX,'STF_HELIUM3',2, &
+                long_name='3He surface gas flux',                 &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_GAS_FLUX = var_cnt
+
+        call define_tavg_field(tavg_3He_GAS_FLUX_DGE,'STF_HELIUM3_DGE',2,  &
+                long_name='3He surface flux due to difusive gas exchange', &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_GAS_FLUX_DGE = var_cnt
+
+        call define_tavg_field(tavg_3He_GAS_FLUX_CTB,'STF_HELIUM3_CTB',2,       &
+                long_name='3He surface flux due to completely trapped bubbles', &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_GAS_FLUX_CTB = var_cnt
+
+        call define_tavg_field(tavg_3He_GAS_FLUX_PTB,'STF_HELIUM3_PTB',2,      &
+                long_name='3He surface flux due to partially trapped bubbles', &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_GAS_FLUX_PTB = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_3He_inert_SCHMIDT,'INERT_HELIUM3_SCHMIDT',2, &
+                long_name='3He Schmidt number',                                  &
+                units='none', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_SCHMIDT = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_KS,'INERT_HELIUM3_KS',2,        &
+                long_name='3He transfer velocity for diffusive gas exchange', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_KS = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_KB,'INERT_HELIUM3_KB',2, &
+                long_name='3He transfer velocity for large bubbles',   &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_KB = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_SURF_SAT,'INERT_HELIUM3_SURF_SAT',2, &
+                long_name='3He saturation',                                        &
+                units='pmol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_SURF_SAT = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_GAS_FLUX,'STF_INERT_HELIUM3',2, &
+                long_name='3He surface gas flux',                             &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_GAS_FLUX = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_GAS_FLUX_DGE,'STF_INERT_HELIUM3_DGE',2, &
+                long_name='3He surface flux due to difusive gas exchange',            &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_GAS_FLUX_DGE = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_GAS_FLUX_CTB,'STF_INERT_HELIUM3_CTB',2, &
+                long_name='3He surface flux due to completely trapped bubbles',       &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_GAS_FLUX_CTB = var_cnt
+
+        call define_tavg_field(tavg_3He_inert_GAS_FLUX_PTB,'STF_INERT_HELIUM3_PTB',2, &
+                long_name='3He surface flux due to partially trapped bubbles',        &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_3He_inert_GAS_FLUX_PTB = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_4He_SCHMIDT,'HELIUM4_SCHMIDT',2, &
+                long_name='4He Schmidt number',                      &
+                units='none', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_SCHMIDT = var_cnt
+
+        call define_tavg_field(tavg_4He_KS,'HELIUM4_KS',2,                    &
+                long_name='4He transfer velocity for diffusive gas exchange', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_KS = var_cnt
+
+        call define_tavg_field(tavg_4He_KB,'HELIUM4_KB',2,           &
+                long_name='4He transfer velocity for large bubbles', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_KB = var_cnt
+
+        call define_tavg_field(tavg_4He_SURF_SAT,'HELIUM4_SURF_SAT',2, &
+                long_name='4He saturation',                            &
+                units='mumol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_SURF_SAT = var_cnt
+
+        call define_tavg_field(tavg_4He_GAS_FLUX,'STF_HELIUM4',2, &
+                long_name='4He surface gas flux',                 &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_GAS_FLUX = var_cnt
+
+        call define_tavg_field(tavg_4He_GAS_FLUX_DGE,'STF_HELIUM4_DGE',2,  &
+                long_name='4He surface flux due to difusive gas exchange', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_GAS_FLUX_DGE = var_cnt
+
+        call define_tavg_field(tavg_4He_GAS_FLUX_CTB,'STF_HELIUM4_CTB',2,       &
+                long_name='4He surface flux due to completely trapped bubbles', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_GAS_FLUX_CTB = var_cnt
+
+        call define_tavg_field(tavg_4He_GAS_FLUX_PTB,'STF_HELIUM4_PTB',2,      &
+                long_name='4He surface flux due to partially trapped bubbles', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_4He_GAS_FLUX_PTB = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_Ne_SCHMIDT,'NEON_SCHMIDT',2, &
+                long_name='Ne Schmidt number',                   &
+                units='none', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_SCHMIDT = var_cnt
+
+        call define_tavg_field(tavg_Ne_KS,'NEON_KS',2,                       &
+                long_name='Ne transfer velocity for diffusive gas exchange', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_KS = var_cnt
+
+        call define_tavg_field(tavg_Ne_KB,'NEON_KB',2,              &
+                long_name='Ne transfer velocity for large bubbles', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_KB = var_cnt
+
+        call define_tavg_field(tavg_Ne_SURF_SAT,'NEON_SURF_SAT',2, &
+                long_name='Ne saturation',                         &
+                units='mumol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_SURF_SAT = var_cnt
+
+        call define_tavg_field(tavg_Ne_GAS_FLUX,'STF_NEON',2, &
+                long_name='Ne surface gas flux',              &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_GAS_FLUX = var_cnt
+
+        call define_tavg_field(tavg_Ne_GAS_FLUX_DGE,'STF_NEON_DGE',2,     &
+                long_name='Ne surface flux due to difusive gas exchange', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_GAS_FLUX_DGE = var_cnt
+
+        call define_tavg_field(tavg_Ne_GAS_FLUX_CTB,'STF_NEON_CTB',2,          &
+                long_name='Ne surface flux due to completely trapped bubbles', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_GAS_FLUX_CTB = var_cnt
+
+        call define_tavg_field(tavg_Ne_GAS_FLUX_PTB,'STF_NEON_PTB',2,         &
+                long_name='Ne surface flux due to partially trapped bubbles', &
+                units='mumol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ne_GAS_FLUX_PTB = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_Ar_SCHMIDT,'ARGON_SCHMIDT',2, &
+                long_name='Ar Schmidt number',                   &
+                units='none', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_SCHMIDT = var_cnt
+
+        call define_tavg_field(tavg_Ar_KS,'ARGON_KS',2,                       &
+                long_name='Ar transfer velocity for diffusive gas exchange', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_KS = var_cnt
+
+        call define_tavg_field(tavg_Ar_KB,'ARGON_KB',2,              &
+                long_name='Ar transfer velocity for large bubbles', &
+                units='m/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_KB = var_cnt
+
+        call define_tavg_field(tavg_Ar_SURF_SAT,'ARGON_SURF_SAT',2, &
+                long_name='Ar saturation',                         &
+                units='mmol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_SURF_SAT = var_cnt
+
+        call define_tavg_field(tavg_Ar_GAS_FLUX,'STF_ARGON',2, &
+                long_name='Ar surface gas flux',              &
+                units='mmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_GAS_FLUX = var_cnt
+
+        call define_tavg_field(tavg_Ar_GAS_FLUX_DGE,'STF_ARGON_DGE',2,     &
+                long_name='Ar surface flux due to difusive gas exchange', &
+                units='mmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_GAS_FLUX_DGE = var_cnt
+
+        call define_tavg_field(tavg_Ar_GAS_FLUX_CTB,'STF_ARGON_CTB',2,          &
+                long_name='Ar surface flux due to completely trapped bubbles', &
+                units='mmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_GAS_FLUX_CTB = var_cnt
+
+        call define_tavg_field(tavg_Ar_GAS_FLUX_PTB,'STF_ARGON_PTB',2,         &
+                long_name='Ar surface flux due to partially trapped bubbles', &
+                units='mmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Ar_GAS_FLUX_PTB = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_Tr_FLUX_EVAP,'STF_TRITIUM_EVAP',2, &
+                long_name='3H surface flux due to evaporation',        &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX_EVAP = var_cnt
+
+        call define_tavg_field(tavg_Tr_FLUX_PREC,'STF_TRITIUM_PREC',2, &
+                long_name='3H surface flux due to precipitation',      &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX_PREC = var_cnt
+
+        call define_tavg_field(tavg_Tr_FLUX,'STF_TRITIUM',2, &
+                long_name='3H total surface flux',           &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX = var_cnt
+
+        call define_tavg_field(tavg_HQ,'HQ',2, &
+                long_name='QSATM/QSAT',        &
+                units='fraction', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_HQ = var_cnt
+
+        !-----------------------------------------------------------------------
+
+        allocate(tr3he_SFLUX_TAVG(nx_block,ny_block,var_cnt,max_blocks_clinic))
+        tr3he_SFLUX_TAVG = c0
+
+        !-----------------------------------------------------------------------
+        !  nonstandard 3D fields
+        !-----------------------------------------------------------------------
+
+        call define_tavg_field(tavg_TRITIUM_DECAY,'TRITIUM_DECAY',3, &
+                long_name='tritium decay',                           &
+                units='pmol/m^3/s', grid_loc='3111',                 &
+                coordinates='TLONG TLAT z_t time')
+
+        !-----------------------------------------------------------------------
+        !EOC
+
+    end subroutine tr3he_init_tavg
+
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_init_sflux
+    ! !INTERFACE:
+
+    subroutine tr3he_init_sflux
+
+        ! !USES:
+
+        use forcing_tools, only: find_forcing_times
+
+        ! !DESCRIPTION:
+        !  Initialize surface flux computations for tr3he tracer module.
+        ! !REVISION HISTORY:
+        !  same as module
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        character(*), parameter :: sub_name = 'tr3he_mod:tr3he_init_sflux'
+
+        integer (int_kind) :: &
+                n,            & ! index for looping over tracers
+                iblock          ! index for looping over blocks
+
+        real (r8), dimension (nx_block,ny_block) :: WORK
+
+        real (r8), dimension (nx_block,ny_block,12,max_blocks_clinic), target :: &
+                WORK_READ            ! temporary space to read in fields
+
+        !-----------------------------------------------------------------------
+
+        select case (tr3he_formulation)
+
+        case ('file')
+
+            !-----------------------------------------------------------------------
+            !  allocate space for interpolate_forcing
+            !-----------------------------------------------------------------------
+
+            allocate(INTERP_WORK(nx_block,ny_block,max_blocks_clinic,1))
+
+            !-----------------------------------------------------------------------
+            !  first, read ice file
+            !-----------------------------------------------------------------------
+
+            allocate(fice_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
+
+            call read_field(fice_file%input%file_fmt, &
+                    fice_file%input%filename,         &
+                    fice_file%input%file_varname,     &
+                    WORK_READ)
+            !$OMP PARALLEL DO PRIVATE(iblock, n)
+            do iblock=1,nblocks_clinic
+                do n=1,12
+                    fice_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
+                    where (.not. LAND_MASK(:,:,iblock)) &
+                            fice_file%DATA(:,:,iblock,1,n) = c0
+                    fice_file%DATA(:,:,iblock,1,n) = &
+                            fice_file%DATA(:,:,iblock,1,n) * fice_file%input%scale_factor
+                end do
+            end do
+            !$OMP END PARALLEL DO
+
+            call find_forcing_times(fice_file%data_time,              &
+                    fice_file%data_inc, fice_file%interp_type,        &
+                    fice_file%data_next, fice_file%data_time_min_loc, &
+                    fice_file%data_update, fice_file%data_type)
+
+            !-----------------------------------------------------------------------
+            !  next, read piston velocity file
+            !-----------------------------------------------------------------------
+
+            allocate(xkw_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
+
+            call read_field(xkw_file%input%file_fmt, &
+                    xkw_file%input%filename,         &
+                    xkw_file%input%file_varname,     &
+                    WORK_READ)
+
+            !$OMP PARALLEL DO PRIVATE(iblock, n)
+            do iblock=1,nblocks_clinic
+                do n=1,12
+                    xkw_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
+                    where (.not. LAND_MASK(:,:,iblock)) &
+                            xkw_file%DATA(:,:,iblock,1,n) = c0
+                    xkw_file%DATA(:,:,iblock,1,n) = &
+                            xkw_file%DATA(:,:,iblock,1,n) * xkw_file%input%scale_factor
+                end do
+            end do
+            !$OMP END PARALLEL DO
+
+            call find_forcing_times(xkw_file%data_time,             &
+                    xkw_file%data_inc, xkw_file%interp_type,        &
+                    xkw_file%data_next, xkw_file%data_time_min_loc, &
+                    xkw_file%data_update, xkw_file%data_type)
+
+            !-----------------------------------------------------------------------
+            !  last, read atmospheric pressure file
+            !-----------------------------------------------------------------------
+
+            allocate(ap_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
+
+            call read_field(ap_file%input%file_fmt, &
+                    ap_file%input%filename,         &
+                    ap_file%input%file_varname,     &
+                    WORK_READ)
+
+            !$OMP PARALLEL DO PRIVATE(iblock, n)
+            do iblock=1,nblocks_clinic
+                do n=1,12
+                    ap_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
+                    where (.not. LAND_MASK(:,:,iblock)) &
+                            ap_file%DATA(:,:,iblock,1,n) = c0
+                    ap_file%DATA(:,:,iblock,1,n) = &
+                            ap_file%DATA(:,:,iblock,1,n) * ap_file%input%scale_factor
+                end do
+            end do
+            !$OMP END PARALLEL DO
+
+            call find_forcing_times(ap_file%data_time,            &
+                    ap_file%data_inc, ap_file%interp_type,        &
+                    ap_file%data_next, ap_file%data_time_min_loc, &
+                    ap_file%data_update, ap_file%data_type)
+
+        case ('model')
+
+            if (my_task == master_task) then
+                write(stdout,*)  &
+                        'Using fields from model forcing for calculating Tr 3He fluxes'
+            endif
+
+        case default
+            call document(sub_name, 'tr3he_formulation', tr3he_formulation)
+
+            call exit_POP(sigAbort, &
+                    'tr3he_init_sflux: Unknown value for tr3he_formulation')
+
+        end select
+
+        !-----------------------------------------------------------------------
+        !EOC
+
+    end subroutine tr3he_init_sflux
+
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_set_sflux
+    ! !INTERFACE:
+
+    subroutine tr3he_set_sflux(SHUM,EVAP_F,PREC_F,U10_SQR,IFRAC,PRESS,SST,SSS,RHO, &
+            SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
+
+        ! !DESCRIPTION:
+        !  Compute tritium, helium, neon & argon surface fluxes and store
+        !  related tavg fields for subsequent accumulating. Air-sea gas fluxes
+        !  for helium 3, helium 4, neon & argon are computed following Liang et
+        !  al. GBC 27, 894-905 (2013).
+        !  NOTE: Liang's model uses mol/m^3 while CESM uses pmol/m^3 for helium
+        !  3, mumol/m^3 for helium 4 and neon and mmol/m^3 for argon. So model
+        !  gas surface concentrations are converted to mol/m^3, the gas fluxes
+        !  are computed in mols/m^2/s and then converted to pmol/m^2/s,
+        !  mumol/m^2/s and mmol/m^3.
+
+        ! !REVISION HISTORY:
+        !  same as module
+
+        ! !USES:
+
+        use time_management, only: thour00
+        use forcing_tools, only: update_forcing_data, interpolate_forcing
+        use timers, only: timer_start, timer_stop
+
+        ! !INPUT PARAMETERS:
+
+        real (r8), dimension(nx_block,ny_block,max_blocks_clinic), intent(in) :: &
+                U10_SQR, & ! 10m wind speed squared (cm/s)**2
+                IFRAC,   & ! sea ice fraction (non-dimensional)
+                PRESS,   & ! sea level atmospheric pressure (dyne/cm**2)
+                SST,     & ! sea surface temperature (C)
+                SSS,     & ! sea surface salinity (psu)
+                RHO,     & ! sea surface density (kg/m^3)
+                EVAP_F,  & ! evaporation flux (kg/m2/s)
+                PREC_F,  & ! precipitation flux (kg/m2/s)
+                SHUM       ! air specific humidity (kg/kg)
+
+        real (r8), dimension(nx_block,ny_block,tr3he_tracer_cnt,max_blocks_clinic), &
+                intent(in) :: SURF_VALS_OLD, SURF_VALS_CUR ! module tracers
+
+        ! !OUTPUT PARAMETERS:
+
+        real (r8), dimension(nx_block,ny_block,tr3he_tracer_cnt,max_blocks_clinic), &
+                intent(inout) :: STF_MODULE
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        integer (int_kind) :: &
+                iblock             ! block index
+
+        integer (int_kind) :: i, j
+
+        real (r8), dimension(nx_block,ny_block,max_blocks_clinic) :: &
+                IFRAC_USED, & ! used ice fraction (non-dimensional)
+                XKW_USED,   & ! part of piston velocity (cm/s)
+                AP_USED       ! used atm pressure (converted from dyne/cm**2 to atm)
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                SURF_VAL,     & ! filtered surface tracer values
+                SCHMIDT,      & ! gas Schmidt number
+                GAS_SOL,      & ! gas solubility (mol/m^3/atm)
+                SURF_SAT,     & ! gas surface saturation
+                He_ALPHA_SOL, & ! helium temperature-dependent solubility fractionation
+                KS,           & ! tranfer velocity for diffusive gas exchange (m/s)
+                KB,           & ! transfer velocity for large bubbles (m/s)
+                FLUX_DGE,     & ! flux due to difusive gas exchange
+                FLUX_CTB,     & ! flux due to completely trapped bubbles
+                FLUX_PTB,     & ! flux due to partially trapped bubbles
+                FLUX,         & ! total gas flux
+                FLUX_EVAP,    & ! tritium flux due to evaporation (pmol/m^2/s)
+                FLUX_PREC,    & ! tritium flux due to precipitation (pmol/m^2/s)
+                U10,          & ! wind speed at 10 m (m/s)
+                USTAR,        & ! water friction velocity (m/s)
+                UA_STAR,      & ! atmospheric friction velocity (m/s)
+                CD,           & ! drag coefficient
+                RW,           & ! water-side resistance to tranfer
+                RA,           & ! air-side resistance to transfer
+                ALPHA,        & ! dimensionless diffusivity
+                DELTA_P,      & ! supersaturation due to partially dissolved bubbles
+                DELTA_EQ,     & ! equilibrium supersaturation
+                QATM,         & ! air absolute humidity (kg/m^3)
+                QSAT,         & ! air absolute saturation humidity (kg/m^3)
+                HQ,           & ! QATM/QSAT
+                CVAP,         & ! tritium concentration in vapor (pmol/m^3)
+                CPREC           ! tritium concentration in precipitation (pmol/m^3)
+
+        character (char_len) :: &
+                tracer_data_label          ! label for what is being updated
+
+        character (char_len), dimension(1) :: &
+                tracer_data_names          ! short names for input data fields
+
+        integer (int_kind), dimension(1) :: &
+                tracer_bndy_loc,            & ! location and field type for ghost
+                tracer_bndy_type              !    cell updates
+
+        logical (log_kind), save :: &
+                first = .true.
+
+        !-----------------------------------------------------------------------
+        !  local parameters
+        !-----------------------------------------------------------------------
+
+        real (r8), parameter ::                   &
+                !xkw_coeff  = 8.6e-7_r8,          & ! xkw_coeff = 0.31 cm/hr s^2/m^2 in (s/m)
+                rhofw      = 1000.0_r8,           & ! density of fresh water (kg/m^3)
+                cm_per_m   = 100.0_r8,            & ! centimeters per meter
+                mol2pmol   = 1.e+12_r8,           & ! conversion factor mol -> pico mol
+                mol2mumol  = 1.e+6_r8,            & ! conversion factor mol -> micro mol
+                alpha_diff = 1.0496_r8,           & ! 3He/4He diffusivity ratio (Bourg & Sposito 2008)
+                MH2O       = 18.01528e-3_r8,      & ! molecular weight of water in kg
+                Sca        = 0.9_r8,              & ! Schmidt number of air
+                zw         = 0.5_r8,              & ! reference water depth
+                deltaw     = 0.01_r8,             & ! molecular sublayer thickness
+                kappa      = 0.4_r8,              &
+                A          = 1.3_r8,              &
+                phi        = 1.0_r8,              &
+                ha         = 0.13_r8,             &
+                hw         = 13.3_r8 / (A * phi)
+
+        !-----------------------------------------------------------------------
+
+        call timer_start(tr3he_sflux_timer)
+
+        do iblock = 1, nblocks_clinic
+            IFRAC_USED(:,:,iblock) = c0
+            XKW_USED(:,:,iblock) = c0
+            AP_USED(:,:,iblock) = c0
         end do
-      end do
-    end do
-
-    !-----------------------------------------------------------------------
-    !  allocate and initialize LAND_MASK (true for ocean points)
-    !-----------------------------------------------------------------------
-
-    allocate( LAND_MASK(nx_block,ny_block,max_blocks_clinic) )
-    LAND_MASK = (KMT.gt.0)
-
-    call get_timer(tr3he_sflux_timer, 'tr3he_SFLUX', 1, distrb_clinic%nprocs)
-
-    !-----------------------------------------------------------------------
-    !  call other initialization subroutines
-    !-----------------------------------------------------------------------
-
-    call tr3he_init_tavg
-    call tr3he_init_sflux
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end subroutine tr3he_init
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_init_tavg
-  ! !INTERFACE:
-
-  subroutine tr3he_init_tavg
-
-    ! !DESCRIPTION:
-    !  Define tavg fields not automatically handled by the base model.
-
-    ! !REVISION HISTORY:
-    !  same as module
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    integer (int_kind) :: &
-      var_cnt             ! how many tavg variables are defined
-
-    !-----------------------------------------------------------------------
-    !  2D fields related to surface fluxes
-    !-----------------------------------------------------------------------
-
-    var_cnt = 0
-
-    call define_tavg_field(tavg_tr3He_IFRAC,'TR3HE_IFRAC',2, &
-      long_name='Ice fraction for 3He fluxes',               &
-      units='fraction', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_tr3He_IFRAC = var_cnt
-
-    call define_tavg_field(tavg_tr3He_XKW,'TR3HE_XKW',2, &
-      long_name='XKW for 3He fluxes',                  &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_tr3He_XKW = var_cnt
-
-    call define_tavg_field(tavg_tr3He_ATM_PRESS,'TR3HE_ATM_PRESS',2, &
-      long_name='Atmospheric pressure for 3He fluxes',             &
-      units='Pascals', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_tr3He_ATM_PRESS = var_cnt
-
-    !-----------------------------------------------------------------------
-
-    call define_tavg_field(tavg_3He_SCHMIDT,'HELIUM3_SCHMIDT',2, &
-      long_name='3He Schmidt number',                            &
-      units='none', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_SCHMIDT = var_cnt
-
-    call define_tavg_field(tavg_3He_KS,'HELIUM3_KS',2,              &
-      long_name='3He transfer velocity for diffusive gas exchange', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_KS = var_cnt
-
-    call define_tavg_field(tavg_3He_KB,'HELIUM3_KB',2,              &
-      long_name='3He transfer velocity for large bubbles', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_KB = var_cnt
-
-    call define_tavg_field(tavg_3He_SURF_SAT,'HELIUM3_SURF_SAT',2, &
-      long_name='3He saturation',                                  &
-      units='pmol/m^3', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_SURF_SAT = var_cnt
-
-    call define_tavg_field(tavg_3He_GAS_FLUX,'STF_HELIUM3',2, &
-      long_name='3He surface gas flux',                       &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_GAS_FLUX = var_cnt
-
-    call define_tavg_field(tavg_3He_GAS_FLUX_DGE,'STF_HELIUM3_DGE',2, &
-      long_name='3He surface flux due to difusive gas exchange',      &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_GAS_FLUX_DGE = var_cnt
-
-    call define_tavg_field(tavg_3He_GAS_FLUX_CTB,'STF_HELIUM3_CTB',2, &
-      long_name='3He surface flux due to completely trapped bubbles', &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_GAS_FLUX_CTB = var_cnt
-
-    call define_tavg_field(tavg_3He_GAS_FLUX_PTB,'STF_HELIUM3_PTB',2, &
-      long_name='3He surface flux due to partially trapped bubbles',  &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_GAS_FLUX_PTB = var_cnt
-
-    !-----------------------------------------------------------------------
-
-    call define_tavg_field(tavg_3He_inert_SCHMIDT,'INERT_HELIUM3_SCHMIDT',2, &
-      long_name='3He Schmidt number',                            &
-      units='none', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_SCHMIDT = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_KS,'INERT_HELIUM3_KS',2,              &
-      long_name='3He transfer velocity for diffusive gas exchange', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_KS = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_KB,'INERT_HELIUM3_KB',2,              &
-      long_name='3He transfer velocity for large bubbles', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_KB = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_SURF_SAT,'INERT_HELIUM3_SURF_SAT',2, &
-      long_name='3He saturation',                                  &
-      units='pmol/m^3', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_SURF_SAT = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_GAS_FLUX,'STF_INERT_HELIUM3',2, &
-      long_name='3He surface gas flux',                       &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_GAS_FLUX = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_GAS_FLUX_DGE,'STF_INERT_HELIUM3_DGE',2, &
-      long_name='3He surface flux due to difusive gas exchange',      &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_GAS_FLUX_DGE = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_GAS_FLUX_CTB,'STF_INERT_HELIUM3_CTB',2, &
-      long_name='3He surface flux due to completely trapped bubbles', &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_GAS_FLUX_CTB = var_cnt
-
-    call define_tavg_field(tavg_3He_inert_GAS_FLUX_PTB,'STF_INERT_HELIUM3_PTB',2, &
-      long_name='3He surface flux due to partially trapped bubbles',  &
-      units='pmol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_3He_inert_GAS_FLUX_PTB = var_cnt
-
-    !-----------------------------------------------------------------------
-
-    call define_tavg_field(tavg_4He_SCHMIDT,'HELIUM4_SCHMIDT',2, &
-      long_name='4He Schmidt number',                            &
-      units='none', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_SCHMIDT = var_cnt
-
-    call define_tavg_field(tavg_4He_KS,'HELIUM4_KS',2,              &
-      long_name='4He transfer velocity for diffusive gas exchange', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_KS = var_cnt
-
-    call define_tavg_field(tavg_4He_KB,'HELIUM4_KB',2,              &
-      long_name='4He transfer velocity for large bubbles', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_KB = var_cnt
-
-    call define_tavg_field(tavg_4He_SURF_SAT,'HELIUM4_SURF_SAT',2, &
-      long_name='4He saturation',                                  &
-      units='mumol/m^3', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_SURF_SAT = var_cnt
-
-    call define_tavg_field(tavg_4He_GAS_FLUX,'STF_HELIUM4',2, &
-      long_name='4He surface gas flux',                       &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_GAS_FLUX = var_cnt
-
-    call define_tavg_field(tavg_4He_GAS_FLUX_DGE,'STF_HELIUM4_DGE',2, &
-      long_name='4He surface flux due to difusive gas exchange',      &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_GAS_FLUX_DGE = var_cnt
-
-    call define_tavg_field(tavg_4He_GAS_FLUX_CTB,'STF_HELIUM4_CTB',2, &
-      long_name='4He surface flux due to completely trapped bubbles', &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_GAS_FLUX_CTB = var_cnt
-
-    call define_tavg_field(tavg_4He_GAS_FLUX_PTB,'STF_HELIUM4_PTB',2, &
-      long_name='4He surface flux due to partially trapped bubbles',  &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_4He_GAS_FLUX_PTB = var_cnt
-
-    !-----------------------------------------------------------------------
-
-    call define_tavg_field(tavg_Ne_SCHMIDT,'NEON_SCHMIDT',2, &
-      long_name='Ne Schmidt number',                            &
-      units='none', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_SCHMIDT = var_cnt
-
-    call define_tavg_field(tavg_Ne_KS,'NEON_KS',2,              &
-      long_name='Ne transfer velocity for diffusive gas exchange', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_KS = var_cnt
-
-    call define_tavg_field(tavg_Ne_KB,'NEON_KB',2,              &
-      long_name='Ne transfer velocity for large bubbles', &
-      units='m/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_KB = var_cnt
-
-    call define_tavg_field(tavg_Ne_SURF_SAT,'NEON_SURF_SAT',2, &
-      long_name='Ne saturation',                                  &
-      units='mumol/m^3', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_SURF_SAT = var_cnt
-
-    call define_tavg_field(tavg_Ne_GAS_FLUX,'STF_NEON',2, &
-      long_name='Ne surface gas flux',                       &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_GAS_FLUX = var_cnt
-
-    call define_tavg_field(tavg_Ne_GAS_FLUX_DGE,'STF_NEON_DGE',2, &
-      long_name='Ne surface flux due to difusive gas exchange',      &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_GAS_FLUX_DGE = var_cnt
-
-    call define_tavg_field(tavg_Ne_GAS_FLUX_CTB,'STF_NEON_CTB',2, &
-      long_name='Ne surface flux due to completely trapped bubbles', &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_GAS_FLUX_CTB = var_cnt
-
-    call define_tavg_field(tavg_Ne_GAS_FLUX_PTB,'STF_NEON_PTB',2, &
-      long_name='Ne surface flux due to partially trapped bubbles',  &
-      units='mumol/m^2/s', grid_loc='2110')
-    var_cnt = var_cnt+1
-    bufind_Ne_GAS_FLUX_PTB = var_cnt
-
-    !-----------------------------------------------------------------------
-
-    allocate(tr3he_SFLUX_TAVG(nx_block,ny_block,var_cnt,max_blocks_clinic))
-    tr3he_SFLUX_TAVG = c0
-
-    !-----------------------------------------------------------------------
-    !  nonstandard 3D fields
-    !-----------------------------------------------------------------------
-
-    call define_tavg_field(tavg_TRITIUM_DECAY,'TRITIUM_DECAY',3, &
-      long_name='tritium decay',                                 &
-      units='pmol/m^3/s', grid_loc='3111',                       &
-      coordinates='TLONG TLAT z_t time')
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end subroutine tr3he_init_tavg
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_init_sflux
-  ! !INTERFACE:
-
-  subroutine tr3he_init_sflux
-
-    ! !USES:
-
-    use forcing_tools, only: find_forcing_times
-
-    ! !DESCRIPTION:
-    !  Initialize surface flux computations for tr3he tracer module.
-    ! !REVISION HISTORY:
-    !  same as module
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    character(*), parameter :: sub_name = 'tr3he_mod:tr3he_init_sflux'
-
-    integer (int_kind) :: &
-      n,                  & ! index for looping over tracers
-      iblock                ! index for looping over blocks
-
-    real (r8), dimension (nx_block,ny_block) :: WORK
-
-    real (r8), dimension (nx_block,ny_block,12,max_blocks_clinic), target :: &
-      WORK_READ            ! temporary space to read in fields
-
-    !-----------------------------------------------------------------------
-
-    select case (tr3he_formulation)
-
-    case ('file')
-
-      !-----------------------------------------------------------------------
-      !  allocate space for interpolate_forcing
-      !-----------------------------------------------------------------------
-
-      allocate(INTERP_WORK(nx_block,ny_block,max_blocks_clinic,1))
-
-      !-----------------------------------------------------------------------
-      !  first, read ice file
-      !-----------------------------------------------------------------------
-
-      allocate(fice_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
-
-      call read_field(fice_file%input%file_fmt, &
-        fice_file%input%filename, &
-        fice_file%input%file_varname, &
-        WORK_READ)
-      !$OMP PARALLEL DO PRIVATE(iblock, n)
-      do iblock=1,nblocks_clinic
-        do n=1,12
-          fice_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
-          where (.not. LAND_MASK(:,:,iblock)) &
-            fice_file%DATA(:,:,iblock,1,n) = c0
-              fice_file%DATA(:,:,iblock,1,n) = &
-                fice_file%DATA(:,:,iblock,1,n) * fice_file%input%scale_factor
+
+        !-----------------------------------------------------------------------
+        !  Interpolate gas flux forcing data if necessary
+        !-----------------------------------------------------------------------
+
+        if (tr3he_formulation == 'file') then
+            if (thour00 >= fice_file%data_update) then
+                tracer_data_names = fice_file%input%file_varname
+                tracer_bndy_loc   = field_loc_center
+                tracer_bndy_type  = field_type_scalar
+                tracer_data_label = 'Ice Fraction'
+                call update_forcing_data(       fice_file%data_time,         &
+                        fice_file%data_time_min_loc,  fice_file%interp_type, &
+                        fice_file%data_next,          fice_file%data_update, &
+                        fice_file%data_type,          fice_file%data_inc,    &
+                        fice_file%DATA(:,:,:,:,1:12), fice_file%data_renorm, &
+                        tracer_data_label,            tracer_data_names,     &
+                        tracer_bndy_loc,              tracer_bndy_type,      &
+                        fice_file%filename,           fice_file%input%file_fmt)
+            endif
+            call interpolate_forcing(INTERP_WORK,                       &
+                    fice_file%DATA(:,:,:,:,1:12),                       &
+                    fice_file%data_time,         fice_file%interp_type, &
+                    fice_file%data_time_min_loc, fice_file%interp_freq, &
+                    fice_file%interp_inc,        fice_file%interp_next, &
+                    fice_file%interp_last,       0)
+            IFRAC_USED = INTERP_WORK(:,:,:,1)
+
+            if (thour00 >= xkw_file%data_update) then
+                tracer_data_names = xkw_file%input%file_varname
+                tracer_bndy_loc   = field_loc_center
+                tracer_bndy_type  = field_type_scalar
+                tracer_data_label = 'Piston Velocity'
+                call update_forcing_data(      xkw_file%data_time,         &
+                        xkw_file%data_time_min_loc,  xkw_file%interp_type, &
+                        xkw_file%data_next,          xkw_file%data_update, &
+                        xkw_file%data_type,          xkw_file%data_inc,    &
+                        xkw_file%DATA(:,:,:,:,1:12), xkw_file%data_renorm, &
+                        tracer_data_label,           tracer_data_names,    &
+                        tracer_bndy_loc,             tracer_bndy_type,     &
+                        xkw_file%filename,           xkw_file%input%file_fmt)
+            endif
+            call interpolate_forcing(INTERP_WORK,                     &
+                    xkw_file%DATA(:,:,:,:,1:12),                      &
+                    xkw_file%data_time,         xkw_file%interp_type, &
+                    xkw_file%data_time_min_loc, xkw_file%interp_freq, &
+                    xkw_file%interp_inc,        xkw_file%interp_next, &
+                    xkw_file%interp_last,       0)
+            XKW_USED = INTERP_WORK(:,:,:,1)
+
+            if (thour00 >= ap_file%data_update) then
+                tracer_data_names = ap_file%input%file_varname
+                tracer_bndy_loc   = field_loc_center
+                tracer_bndy_type  = field_type_scalar
+                tracer_data_label = 'Atmospheric Pressure'
+                call update_forcing_data(     ap_file%data_time,         &
+                        ap_file%data_time_min_loc,  ap_file%interp_type, &
+                        ap_file%data_next,          ap_file%data_update, &
+                        ap_file%data_type,          ap_file%data_inc,    &
+                        ap_file%DATA(:,:,:,:,1:12), ap_file%data_renorm, &
+                        tracer_data_label,          tracer_data_names,   &
+                        tracer_bndy_loc,            tracer_bndy_type,    &
+                        ap_file%filename,           ap_file%input%file_fmt)
+            endif
+            call interpolate_forcing(INTERP_WORK,                   &
+                    ap_file%DATA(:,:,:,:,1:12),                     &
+                    ap_file%data_time,         ap_file%interp_type, &
+                    ap_file%data_time_min_loc, ap_file%interp_freq, &
+                    ap_file%interp_inc,        ap_file%interp_next, &
+                    ap_file%interp_last,       0)
+            AP_USED = INTERP_WORK(:,:,:,1)
+        endif
+
+        do iblock = 1, nblocks_clinic
+
+            if (tr3he_formulation == 'file') then
+                where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) < 0.2000_r8) &
+                        IFRAC_USED(:,:,iblock) = 0.2000_r8
+                where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) > 0.9999_r8) &
+                        IFRAC_USED(:,:,iblock) = 0.9999_r8
+            endif
+
+            if (tr3he_formulation == 'model') then
+                where (LAND_MASK(:,:,iblock))
+                    IFRAC_USED(:,:,iblock)   = IFRAC(:,:,iblock)
+                    ! XKW_USED(:,:,iblock)     = xkw_coeff * U10_SQR(:,:,iblock)
+                    AP_USED(:,:,iblock)      = PRESS(:,:,iblock)
+                endwhere
+                where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) < c0) &
+                        IFRAC_USED(:,:,iblock) = c0
+                where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) > c1) &
+                        IFRAC_USED(:,:,iblock) = c1
+            endif
+
+            !-----------------------------------------------------------------------
+            !  convert pressure from dyne/cm**2 to Pascals
+            !  convertion from dyne/cm**2 to Pascals is P(mks) = P(cgs)/10.
+            !  convertion from Pascals to atm is P(atm) = P(Pa)/101.325e+3_r8
+            !-----------------------------------------------------------------------
+
+            AP_USED(:,:,iblock) = AP_USED(:,:,iblock) * (c1 / 1013.25e+3_r8) ! dyne/cm**2 -> atm
+            !AP_USED(:,:,iblock) = AP_USED(:,:,iblock) / c10
+
+            where (LAND_MASK(:,:,iblock))
+                tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock)     = IFRAC_USED(:,:,iblock)
+                !tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock)       = XKW_USED(:,:,iblock)
+                tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock) = AP_USED(:,:,iblock)
+            endwhere
+
+            U10     = sqrt(U10_SQR(:,:,iblock)) * 1.e-2_r8 ! cm/s -> m/s
+            USTAR   = calc_ustar(LAND_MASK(:,:,iblock), U10, RHO(:,:,iblock))
+            UA_STAR = USTAR / sqrt(rho_air/RHO(:,:,iblock))
+            CD      = calc_cdu10(LAND_MASK(:,:,iblock), U10)
+
+            !-----------------------------------------------------------------------
+            !  3He fluxes
+            !-----------------------------------------------------------------------
+
+            GAS_SOL = he4_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+                    SSS(:,:,iblock), RHO(:,:,iblock))
+            He_ALPHA_SOL = alpha_sol_he(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+            SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
+
+            where (LAND_MASK(:,:,iblock))
+
+                !---------- Diffusive gas exchange (mol/m^2/s) -----------------------
+                SURF_SAT = GAS_SOL * Ir * He_ALPHA_SOL * AP_USED(:,:,iblock) ! mol/m^3
+                SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
+                RW = sqrt(RHO(:,:,iblock)/rho_air) * (hw * sqrt(SCHMIDT) + &
+                        log(zw/deltaw)/kappa)
+                RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+                ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+                KS = UA_STAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+                FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm - &
+                        SURF_VAL/SURF_SAT)
+
+                !---------- Flux due to completely trapped bubbles (mol/m^2/s) --------
+                FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir
+
+                !---------- Flux due to partially trapped bubbles (mol/m^2/s) ---------
+                KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+                        * 1.e-2_r8/3600.0_r8 ! cm/hr -> m/s
+                DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+                FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                        - SURF_VAL/SURF_SAT)
+
+                !---------- equilibrium supersaturation (fraction) ---------------------
+                !DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                !        / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+                !---------- Total gas flux ---------------------------------------------
+                FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+                STF_MODULE(:,:,he3_ind,iblock) = FLUX * 1.e+12_r8 * cm_per_m ! mol/m^2/s -> pmol/m^3 * cm/s
+
+                !-----------------------------------------------------------------------
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)      = SCHMIDT
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock)           = KS
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock)           = KB
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock) = FLUX_DGE * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock) = FLUX_CTB * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock) = FLUX_PTB * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock)     = FLUX     * 1.e+12_r8 ! mol->pmol
+            elsewhere
+                STF_MODULE(:,:,he3_ind,iblock) = c0
+            endwhere
+
+            !-----------------------------------------------------------------------
+            !  inert 3He fluxes
+            !-----------------------------------------------------------------------
+
+            ! SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
+
+            where (LAND_MASK(:,:,iblock))
+
+                !---------- Diffusive gas exchange (mol/m^2/s) -----------------------
+                SURF_SAT = GAS_SOL * Ir * He_ALPHA_SOL * AP_USED(:,:,iblock) ! mol/m^3
+                SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_inert_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,he3_inert_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
+                RW = sqrt(RHO(:,:,iblock)/rho_air) * (hw * sqrt(SCHMIDT) + &
+                        log(zw/deltaw)/kappa)
+                RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+                ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+                KS = UA_STAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+                FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm - &
+                        SURF_VAL/SURF_SAT)
+
+                !---------- Flux due to completely trapped bubbles (mol/m^2/s) --------
+                FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir
+
+                !---------- Flux due to partially trapped bubbles (mol/m^2/s) ---------
+                KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+                        * 1.e-2_r8/3600.0_r8 ! cm/hr -> m/s
+                DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+                FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                        - SURF_VAL/SURF_SAT)
+
+                !---------- equilibrium supersaturation (fraction) ---------------------
+                !DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                !        / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+                !---------- Total gas flux ---------------------------------------------
+                FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+                STF_MODULE(:,:,he3_inert_ind,iblock) = FLUX * 1.e+12_r8 * cm_per_m ! mol/m^2/s -> pmol/m^3 * cm/s
+
+                !-----------------------------------------------------------------------
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock)      = SCHMIDT
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock)           = KS
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock)           = KB
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock) = FLUX_DGE * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock) = FLUX_CTB * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock) = FLUX_PTB * 1.e+12_r8 ! mol->pmol
+                tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock)     = FLUX     * 1.e+12_r8 ! mol->pmol
+            elsewhere
+                STF_MODULE(:,:,he3_inert_ind,iblock) = c0
+            endwhere
+
+            !-----------------------------------------------------------------------
+            !  4He fluxes
+            !-----------------------------------------------------------------------
+
+            SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+
+            where (LAND_MASK(:,:,iblock))
+
+                !---------- Diffusive gas exchange (mol/m^2/s) -----------------------
+                SURF_SAT = GAS_SOL * AP_USED(:,:,iblock) ! mol/m^3
+                SURF_VAL = p5*(SURF_VALS_OLD(:,:,he4_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,he4_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
+                RW = sqrt(RHO(:,:,iblock)/rho_air) * (hw * sqrt(SCHMIDT) + &
+                        log(zw/deltaw)/kappa)
+                RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+                ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+                KS = UA_STAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+                FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm - &
+                        SURF_VAL/SURF_SAT)
+
+                !---------- Flux due to completely trapped bubbles (mol/m^2/s) --------
+                FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe
+
+                !---------- Flux due to partially trapped bubbles (mol/m^2/s) ---------
+                KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+                        * 1.e-2_r8/3600.0_r8 ! cm/hr -> m/s
+                DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+                FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                        - SURF_VAL/SURF_SAT)
+
+                !---------- equilibrium supersaturation (fraction) ---------------------
+                !DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                !        / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+                !---------- Total gas flux ---------------------------------------------
+                FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+                STF_MODULE(:,:,he4_ind,iblock) = FLUX * 1.e+6_r8 * cm_per_m ! mol/m^2/s -> mumol/m^3 * cm/s
+
+                !-----------------------------------------------------------------------
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock)      = SCHMIDT
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock)           = KS
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock)           = KB
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock) = FLUX_DGE * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock) = FLUX_CTB * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock) = FLUX_PTB * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock)     = FLUX     * 1.e+6_r8 ! mol->mumol
+            elsewhere
+                STF_MODULE(:,:,he4_ind,iblock) = c0
+            endwhere
+
+            !-----------------------------------------------------------------------
+            !  Ne fluxes
+            !-----------------------------------------------------------------------
+
+            GAS_SOL = ne_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+                    SSS(:,:,iblock), RHO(:,:,iblock))
+            SCHMIDT = schmidt_ne(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+
+            where (LAND_MASK(:,:,iblock))
+
+                !---------- Diffusive gas exchange (mol/m^2/s) -----------------------
+                SURF_SAT = GAS_SOL * AP_USED(:,:,iblock) ! mol/m^3
+                SURF_VAL = p5*(SURF_VALS_OLD(:,:,ne_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,ne_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
+                RW = sqrt(RHO(:,:,iblock)/rho_air) * (hw * sqrt(SCHMIDT) + &
+                        log(zw/deltaw)/kappa)
+                RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+                ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+                KS = UA_STAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+                FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm - &
+                        SURF_VAL/SURF_SAT)
+
+                !---------- Flux due to completely trapped bubbles (mol/m^2/s) --------
+                FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xne
+
+                !---------- Flux due to partially trapped bubbles (mol/m^2/s) ---------
+                KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+                        * 1.e-2_r8/3600.0_r8 ! cm/hr -> m/s
+                DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+                FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                        - SURF_VAL/SURF_SAT)
+
+                !---------- equilibrium supersaturation (fraction) ---------------------
+                !DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                !        / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+                !---------- Total gas flux ---------------------------------------------
+                FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+                STF_MODULE(:,:,ne_ind,iblock) = FLUX * 1.e+6_r8 * cm_per_m ! mol/m^2/s -> mumol/m^3 * cm/s
+
+                !-----------------------------------------------------------------------
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock)      = SCHMIDT
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock)           = KS
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock)           = KB
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock) = FLUX_DGE * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock) = FLUX_CTB * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock) = FLUX_PTB * 1.e+6_r8 ! mol->mumol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock)     = FLUX     * 1.e+6_r8 ! mol->mumol
+            elsewhere
+                STF_MODULE(:,:,ne_ind,iblock) = c0
+            endwhere
+
+            !-----------------------------------------------------------------------
+            !  Ar fluxes
+            !-----------------------------------------------------------------------
+
+            GAS_SOL = ar_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
+                    SSS(:,:,iblock), RHO(:,:,iblock))
+            SCHMIDT = schmidt_ar(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+
+            where (LAND_MASK(:,:,iblock))
+
+                !---------- Diffusive gas exchange (mol/m^2/s) -----------------------
+                SURF_SAT = GAS_SOL * AP_USED(:,:,iblock) ! mol/m^3
+                SURF_VAL = p5*(SURF_VALS_OLD(:,:,ar_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,ar_ind,iblock)) / 1.e+3_r8 ! mmol -> mol
+                RW = sqrt(RHO(:,:,iblock)/rho_air) * (hw * sqrt(SCHMIDT) + &
+                        log(zw/deltaw)/kappa)
+                RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
+                ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
+                KS = UA_STAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
+                FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm - &
+                        SURF_VAL/SURF_SAT)
+
+                !---------- Flux due to completely trapped bubbles (mol/m^2/s) --------
+                FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xar
+
+                !---------- Flux due to partially trapped bubbles (mol/m^2/s) ---------
+                KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
+                        * 1.e-2_r8/3600.0_r8 ! cm/hr -> m/s
+                DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
+                FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
+                        - SURF_VAL/SURF_SAT)
+
+                !---------- equilibrium supersaturation (fraction) ---------------------
+                !DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
+                !        / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+
+                !---------- Total gas flux ---------------------------------------------
+                FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
+                STF_MODULE(:,:,ar_ind,iblock) = FLUX * 1.e+3_r8 * cm_per_m ! mol/m^2/s -> mmol/m^3 * cm/s
+
+                !-----------------------------------------------------------------------
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_SCHMIDT,iblock)      = SCHMIDT
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_KS,iblock)           = KS
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_KB,iblock)           = KB
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_SURF_SAT,iblock)     = SURF_SAT * 1.e+3_r8 ! mol->mmol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_DGE,iblock) = FLUX_DGE * 1.e+3_r8 ! mol->mmol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_CTB,iblock) = FLUX_CTB * 1.e+3_r8 ! mol->mmol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_PTB,iblock) = FLUX_PTB * 1.e+3_r8 ! mol->mmol
+                tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX,iblock)     = FLUX     * 1.e+3_r8 ! mol->mmol
+            elsewhere
+                STF_MODULE(:,:,ar_ind,iblock) = c0
+            endwhere
+
+            !-----------------------------------------------------------------------
+            !  Tritium flux/deposition (pmol/m^2/s)
+            !-----------------------------------------------------------------------
+
+            QATM  = max(c0, SHUM(:,:,iblock)/rho_air) ! SHUM has small negative values
+            QSAT  = 0.98_r8 * 640380._r8 / exp(5107.4_r8/(SST(:,:,iblock)+T0_kelvin))
+            HQ    = QATM/QSAT
+            CVAP  = 0.10995_r8 * 0.70_r8 ! pmol/m^3 (Cv = 0.7 TU)
+            CPREC = 0.10995_r8           ! pmol/m^3 (Cp = 1   TU)
+
+            where (LAND_MASK(:,:,iblock))
+                SURF_VAL = max(c0, p5*(SURF_VALS_OLD(:,:,tr_ind,iblock) + &
+                        SURF_VALS_CUR(:,:,tr_ind,iblock))) ! pmol/m^3
+                ! NOTE: sign in FLUX_EVAP is opposite of Doney et al. 1993 because E = Vdown - Vup in CESM
+                FLUX_EVAP = EVAP_F(:,:,iblock) * (c1/(1.12_r8 * (c1 - HQ)) * SURF_VAL - HQ / (c1 - HQ) * CVAP) / rhofw
+                FLUX_PREC = PREC_F(:,:,iblock) * CPREC / rhofw
+                FLUX      = FLUX_PREC ! + FLUX_EVAP ! pmol/m^2/s
+                STF_MODULE(:,:,tr_ind,iblock) = FLUX * cm_per_m ! pmol/m^2/s -> pmol/m^3 * cm/s
+                ! store tavg
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock) = FLUX_EVAP
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock) = FLUX_PREC
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock)      = FLUX
+                tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock)           = HQ
+            elsewhere
+                STF_MODULE(:,:,tr_ind,iblock) = c0
+            endwhere
+
         end do
-      end do
-      !$OMP END PARALLEL DO
 
-      call find_forcing_times(fice_file%data_time, &
-        fice_file%data_inc, fice_file%interp_type, &
-        fice_file%data_next, fice_file%data_time_min_loc, &
-        fice_file%data_update, fice_file%data_type)
+        call timer_stop(tr3he_sflux_timer)
 
-      !-----------------------------------------------------------------------
-      !  next, read piston velocity file
-      !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !EOC
 
-      allocate(xkw_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
+    end subroutine tr3he_set_sflux
 
-      call read_field(xkw_file%input%file_fmt, &
-        xkw_file%input%filename, &
-        xkw_file%input%file_varname, &
-        WORK_READ)
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_set_interior
+    ! !INTERFACE:
 
-      !$OMP PARALLEL DO PRIVATE(iblock, n)
-      do iblock=1,nblocks_clinic
-        do n=1,12
-          xkw_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
-          where (.not. LAND_MASK(:,:,iblock)) &
-            xkw_file%DATA(:,:,iblock,1,n) = c0
-              xkw_file%DATA(:,:,iblock,1,n) = &
-                xkw_file%DATA(:,:,iblock,1,n) * xkw_file%input%scale_factor
-        end do
-      end do
-      !$OMP END PARALLEL DO
+    subroutine tr3he_set_interior(k, TRACER_MODULE_OLD, TRACER_MODULE_CUR, &
+            DTRACER_MODULE, this_block)
 
-      call find_forcing_times(xkw_file%data_time, &
-        xkw_file%data_inc, xkw_file%interp_type, &
-        xkw_file%data_next, xkw_file%data_time_min_loc, &
-        xkw_file%data_update, xkw_file%data_type)
+        ! !DESCRIPTION:
+        !  Compute time derivatives for tritium and helium 3
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-      !-----------------------------------------------------------------------
-      !  last, read atmospheric pressure file
-      !-----------------------------------------------------------------------
+        ! !USES:
 
-      allocate(ap_file%DATA(nx_block,ny_block,max_blocks_clinic,1,12))
+        use grid, only: KMT
 
-      call read_field(ap_file%input%file_fmt, &
-        ap_file%input%filename, &
-        ap_file%input%file_varname, &
-        WORK_READ)
+        ! !INPUT PARAMETERS:
 
-      !$OMP PARALLEL DO PRIVATE(iblock, n)
-      do iblock=1,nblocks_clinic
-        do n=1,12
-          ap_file%DATA(:,:,iblock,1,n) = WORK_READ(:,:,n,iblock)
-          where (.not. LAND_MASK(:,:,iblock)) &
-            ap_file%DATA(:,:,iblock,1,n) = c0
-              ap_file%DATA(:,:,iblock,1,n) = &
-                ap_file%DATA(:,:,iblock,1,n) * ap_file%input%scale_factor
-        end do
-      end do
-      !$OMP END PARALLEL DO
+        integer(int_kind), intent(in) :: &
+                k                    ! vertical level index
 
-      call find_forcing_times(ap_file%data_time, &
-        ap_file%data_inc, ap_file%interp_type, &
-        ap_file%data_next, ap_file%data_time_min_loc, &
-        ap_file%data_update, ap_file%data_type)
+        real (r8), dimension(nx_block,ny_block,km,tr3he_tracer_cnt), intent(in) :: &
+                TRACER_MODULE_OLD, & ! old tracer values
+                TRACER_MODULE_CUR    ! current tracer values
 
-    case ('model')
+        type (block), intent(in) :: &
+                this_block          ! block info for the current block
 
-      if (my_task == master_task) then
-        write(stdout,*)  &
-          'Using fields from model forcing for calculating Tr 3He fluxes'
-      endif
+        ! !OUTPUT PARAMETERS:
 
-    case default
-      call document(sub_name, 'tr3he_formulation', tr3he_formulation)
+        real(r8), dimension(nx_block,ny_block,tr3he_tracer_cnt), intent(out) :: &
+                DTRACER_MODULE       ! computed source/sink term
 
-      call exit_POP(sigAbort, &
-        'tr3he_init_sflux: Unknown value for tr3he_formulation')
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    end select
+        character(*), parameter :: &
+                subname = 'tr3he_mod:tr3he_set_interior'
 
-    !-----------------------------------------------------------------------
-    !EOC
+        real (r8), parameter ::               &
+                spd    = 86400.0_r8,          & ! number of seconds in a day
+                spy    = 365.0_r8*spd,        & ! number of seconds in a year
+                hlife  = 12.31_r8,            & ! tritium half-life in years
+                lambda = -log(p5)/(hlife*spy)   ! tritium decay constant (1/sec)
 
-  end subroutine tr3he_init_sflux
+        real (r8), dimension(nx_block,ny_block) :: &
+                tritium_loc,  & ! local copy of model tritium
+                helium3_loc,  & ! local copy of model helium 3
+                TRITIUM_DECAY   ! tritium decay term
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_set_sflux
-  ! !INTERFACE:
+        integer (int_kind) :: &
+                bid             ! local_block id
 
-  subroutine tr3he_set_sflux(U10_SQR,IFRAC,PRESS,SST,SSS,RHO, &
-    SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
+        !-----------------------------------------------------------------------
 
-    ! !DESCRIPTION:
-    !  Compute tritium, helium and neon surface fluxes and store related tavg
-    !  fields for subsequent accumulating. Air-sea gas fluxes for helium 3,
-    !  helium 4 and neon are computed following Liang et al. GBC 27, 894-905 (2013)
-    !  NOTE: the gas flux model uses mol/m^3 while CESM uses pmol/m^3 for helium 3
-    !  and mumol/m^3 for helium 4 and neon. So model helium 3 & helium 4 surface
-    !  concentrations are converted to mol/m^3, the gas fluxes are computed in
-    !  mols/m^2/s and then converted to pmol/m^2/s and mumol/m^2/s.
+        bid = this_block%local_id
 
-    ! !REVISION HISTORY:
-    !  same as module
+        DTRACER_MODULE = c0
 
-    ! !USES:
+        !-----------------------------------------------------------------------
+        !  create local copies of model tracers
+        !  treat negative values as zero
+        !-----------------------------------------------------------------------
 
-    use time_management, only: thour00
-    use forcing_tools, only: update_forcing_data, interpolate_forcing
-    use timers, only: timer_start, timer_stop
+        tritium_loc = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,tr_ind) + &
+                TRACER_MODULE_CUR(:,:,k,tr_ind)))
+        !   helium3_loc = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,he3_ind) + &
+        !     TRACER_MODULE_CUR(:,:,k,he3_ind)))
 
-    ! !INPUT PARAMETERS:
+        !-----------------------------------------------------------------------
+        !  apply LAND_MASK to local copies
+        !-----------------------------------------------------------------------
 
-    real (r8), dimension(nx_block,ny_block,max_blocks_clinic), intent(in) :: &
-      U10_SQR,   & ! 10m wind speed squared (cm/s)**2
-      IFRAC,     & ! sea ice fraction (non-dimensional)
-      PRESS,     & ! sea level atmospheric pressure (dyne/cm**2)
-      SST,       & ! sea surface temperature (C)
-      SSS,       & ! sea surface salinity (psu)
-      RHO          ! sea surface density (kg/m^3)
+        where (.not. LAND_MASK(:,:,bid) .or. k > KMT(:,:,bid))
+            tritium_loc = c0
+            !helium3_loc = c0
+        end where
 
-    real (r8), dimension(nx_block,ny_block,tr3he_tracer_cnt,max_blocks_clinic), &
-      intent(in) :: SURF_VALS_OLD, SURF_VALS_CUR ! module tracers
+        !-----------------------------------------------------------------------
+        !  compute time derivatives
+        !-----------------------------------------------------------------------
 
-    ! !OUTPUT PARAMETERS:
+        TRITIUM_DECAY = lambda * tritium_loc
+        DTRACER_MODULE(:,:,tr_ind)  = -TRITIUM_DECAY
+        DTRACER_MODULE(:,:,he3_ind) = TRITIUM_DECAY
 
-    real (r8), dimension(nx_block,ny_block,tr3he_tracer_cnt,max_blocks_clinic), &
-      intent(inout) :: STF_MODULE
+        call accumulate_tavg_field(TRITIUM_DECAY, tavg_TRITIUM_DECAY,bid,k)
 
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !EOC
 
-    integer (int_kind) :: &
-      iblock             ! block index
+    end subroutine tr3he_set_interior
 
-    integer (int_kind) :: i, j
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: he4_sol_0
+    ! !INTERFACE:
 
-    real (r8), dimension(nx_block,ny_block,max_blocks_clinic) :: &
-      IFRAC_USED,      & ! used ice fraction (non-dimensional)
-      XKW_USED,        & ! part of piston velocity (cm/s)
-      AP_USED            ! used atm pressure (converted from dyne/cm**2 to Pa)
+    function he4_sol_0(LAND_MASK, SST, SSS, RHO)
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      SURF_VAL,        & ! filtered surface tracer values
-      SCHMIDT,         & ! gas Schmidt number
-      He4_SOL,         & ! solubility of helium 4 (mol/m^3/Pa)
-      Ne_SOL,        & ! solubility of neon (mol/m^3/Pa)
-      SURF_SAT,        & ! gas surface saturation (pmol/m^3)
-      GAS_PPATM,       & ! gas partial pressure in the atmosphere (Pa)
-      He_ALPHA_SOL,    & ! temperature-dependent solubility fractionation
-      ! XKW_ICE,         & ! (1-fice) * xkw (m/s)
-      KS,              & ! tranfer velocity for diffusive gas exchange (m/s)
-      KB,              & ! transfer velocity for large bubbles (m/s)
-      FLUX_DGE,        & ! flux due to difusive gas exchange (pmol/m^2/s)
-      FLUX_CTB,        & ! flux due to completely trapped bubbles (pmol/m^2/s)
-      FLUX_PTB,        & ! flux due to partially trapped bubbles (pmol/m^2/s)
-      FLUX,            & ! total gas flux (pmol/m^2/s)
-      U10,             & ! wind speed at 10 m (m/s)
-      USTAR,           & ! friction velocity (m/s)
-      CD,              & ! drag coefficient
-      RW,              & ! water-side resistance to tranfer
-      RA,              & ! air-side resistance to transfer
-      ALPHA,           & ! dimensionless diffusivity
-      DELTA_P,         & ! supersaturation due to partially dissolved bubbles
-      DELTA_EQ           ! equilibrium supersaturation
+        ! !DESCRIPTION:
+        !  Compute solubility for 4He in mol/(m^3 atm)
+        !  (Weiss, Journal of Chemical Engineering Data, 1971)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    character (char_len) :: &
-      tracer_data_label          ! label for what is being updated
+        ! !USES:
 
-    character (char_len), dimension(1) :: &
-      tracer_data_names          ! short names for input data fields
+        ! !INPUT PARAMETERS:
 
-    integer (int_kind), dimension(1) :: &
-      tracer_bndy_loc,         & ! location and field type for ghost
-      tracer_bndy_type           !    cell updates
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    logical (log_kind), save :: &
-      first = .true.
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST, & ! sea surface temperature (C)
+                SSS, & ! sea surface salinity (psu)
+                RHO    ! density (kg/m^3)
 
-    !-----------------------------------------------------------------------
-    !  local parameters
-    !-----------------------------------------------------------------------
+        ! !OUTPUT PARAMETERS:
 
-    real (r8), parameter ::         &
-      !xkw_coeff  = 8.6e-7_r8,      & ! xkw_coeff = 0.31 cm/hr s^2/m^2 in (s/m)
-      alpha_diff = 1.0496_r8,       & ! 3He/4He diffusivity ratio (Bourg & Sposito 2008)
-      MH2O       = 18.01528e-3_r8,  & ! molecular weight of water in kg
-      Sca        = 0.9_r8,          & ! Schmidt number of air
-      zw         = 0.5_r8,          & ! reference water depth
-      deltaw     = 0.01_r8,         & ! molecular sublayer thickness
-      kappa      = 0.4_r8,          &
-      A          = 1.3_r8,          &
-      phi        = 1.0_r8,          &
-      ha         = 0.13_r8,         &
-      hw         = 13.3_r8 / (A * phi)
+        real (r8), dimension(nx_block,ny_block) :: &
+                he4_sol_0           ! solubility of neon
 
-      !-----------------------------------------------------------------------
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    call timer_start(tr3he_sflux_timer)
+        real (r8), parameter ::       &
+                A1   = -167.2178_r8,  &
+                A2   = 216.3442_r8,   &
+                A3   = 139.2032_r8,   &
+                A4   = -22.6202_r8,   &
+                B1   = -0.044781_r8,  &
+                B2   = 0.023541_r8,   &
+                B3   = -0.0034266_r8, &
+                c100 = 100.0_r8
 
-    do iblock = 1, nblocks_clinic
-      IFRAC_USED(:,:,iblock) = c0
-      XKW_USED(:,:,iblock) = c0
-      AP_USED(:,:,iblock) = c0
-    end do
+        real (r8), dimension(nx_block,ny_block) :: &
+                Tk     ! sea surface temperature in Kelvin
 
-    !-----------------------------------------------------------------------
-    !  Interpolate gas flux forcing data if necessary
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
+        !  compute solubility
+        !-----------------------------------------------------------------------
 
-    if (tr3he_formulation == 'file') then
-      if (thour00 >= fice_file%data_update) then
-        tracer_data_names = fice_file%input%file_varname
-        tracer_bndy_loc   = field_loc_center
-        tracer_bndy_type  = field_type_scalar
-        tracer_data_label = 'Ice Fraction'
-        call update_forcing_data(       fice_file%data_time,   &
-          fice_file%data_time_min_loc,  fice_file%interp_type, &
-          fice_file%data_next,          fice_file%data_update, &
-          fice_file%data_type,          fice_file%data_inc,    &
-          fice_file%DATA(:,:,:,:,1:12), fice_file%data_renorm, &
-          tracer_data_label,            tracer_data_names,     &
-          tracer_bndy_loc,              tracer_bndy_type,      &
-          fice_file%filename,           fice_file%input%file_fmt)
-      endif
-      call interpolate_forcing(INTERP_WORK, &
-        fice_file%DATA(:,:,:,:,1:12), &
-        fice_file%data_time,         fice_file%interp_type, &
-        fice_file%data_time_min_loc, fice_file%interp_freq, &
-        fice_file%interp_inc,        fice_file%interp_next, &
-        fice_file%interp_last,       0)
-      IFRAC_USED = INTERP_WORK(:,:,:,1)
-
-      if (thour00 >= xkw_file%data_update) then
-        tracer_data_names = xkw_file%input%file_varname
-        tracer_bndy_loc   = field_loc_center
-        tracer_bndy_type  = field_type_scalar
-        tracer_data_label = 'Piston Velocity'
-        call update_forcing_data(      xkw_file%data_time,   &
-          xkw_file%data_time_min_loc,  xkw_file%interp_type, &
-          xkw_file%data_next,          xkw_file%data_update, &
-          xkw_file%data_type,          xkw_file%data_inc,    &
-          xkw_file%DATA(:,:,:,:,1:12), xkw_file%data_renorm, &
-          tracer_data_label,           tracer_data_names,    &
-          tracer_bndy_loc,             tracer_bndy_type,     &
-          xkw_file%filename,           xkw_file%input%file_fmt)
-      endif
-      call interpolate_forcing(INTERP_WORK, &
-        xkw_file%DATA(:,:,:,:,1:12), &
-        xkw_file%data_time,         xkw_file%interp_type, &
-        xkw_file%data_time_min_loc, xkw_file%interp_freq, &
-        xkw_file%interp_inc,        xkw_file%interp_next, &
-        xkw_file%interp_last,       0)
-      XKW_USED = INTERP_WORK(:,:,:,1)
-
-      if (thour00 >= ap_file%data_update) then
-        tracer_data_names = ap_file%input%file_varname
-        tracer_bndy_loc   = field_loc_center
-        tracer_bndy_type  = field_type_scalar
-        tracer_data_label = 'Atmospheric Pressure'
-        call update_forcing_data(     ap_file%data_time,   &
-          ap_file%data_time_min_loc,  ap_file%interp_type, &
-          ap_file%data_next,          ap_file%data_update, &
-          ap_file%data_type,          ap_file%data_inc,    &
-          ap_file%DATA(:,:,:,:,1:12), ap_file%data_renorm, &
-          tracer_data_label,          tracer_data_names,   &
-          tracer_bndy_loc,            tracer_bndy_type,    &
-          ap_file%filename,           ap_file%input%file_fmt)
-      endif
-      call interpolate_forcing(INTERP_WORK, &
-        ap_file%DATA(:,:,:,:,1:12), &
-        ap_file%data_time,         ap_file%interp_type, &
-        ap_file%data_time_min_loc, ap_file%interp_freq, &
-        ap_file%interp_inc,        ap_file%interp_next, &
-        ap_file%interp_last,       0)
-      AP_USED = INTERP_WORK(:,:,:,1)
-    endif
-
-    do iblock = 1, nblocks_clinic
-
-      if (tr3he_formulation == 'file') then
-        where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) < 0.2000_r8) &
-          IFRAC_USED(:,:,iblock) = 0.2000_r8
-        where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) > 0.9999_r8) &
-          IFRAC_USED(:,:,iblock) = 0.9999_r8
-      endif
-
-      if (tr3he_formulation == 'model') then
-        where (LAND_MASK(:,:,iblock))
-          IFRAC_USED(:,:,iblock)   = IFRAC(:,:,iblock)
-          ! XKW_USED(:,:,iblock)     = xkw_coeff * U10_SQR(:,:,iblock)
-          AP_USED(:,:,iblock)      = PRESS(:,:,iblock)
+        where (LAND_MASK)
+            Tk = SST + T0_Kelvin
+            he4_sol_0 = exp(A1 + A2 * (c100/Tk) + A3 * log(Tk/c100) + A4 * (Tk/c100) &
+                    + SSS * (B1 + B2 * (Tk/c100) + B3 * (Tk/c100)**2))
+            he4_sol_0 = he4_sol_0 * 4.455817671505537e+1_r8 ! mL/kg   -> umol/kg for He (1/22.44257e-3)
+            he4_sol_0 = he4_sol_0 * 1.e-6_r8 * RHO          ! umol/kg -> mol/m^3
+         elsewhere
+            he4_sol_0 = c0
         endwhere
-        where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) < c0) &
-          IFRAC_USED(:,:,iblock) = c0
-        where (LAND_MASK(:,:,iblock) .and. IFRAC_USED(:,:,iblock) > c1) &
-          IFRAC_USED(:,:,iblock) = c1
-      endif
-
-      !-----------------------------------------------------------------------
-      !  convert pressure from dyne/cm**2 to Pascals
-      !  convertion from dyne/cm**2 to Pascals is P(mks) = P(cgs)/10.
-      !  convertion from Pascals to atm is P(atm) = P(Pa)/101.325e+3_r8
-      !-----------------------------------------------------------------------
-
-      !AP_USED(:,:,iblock) = AP_USED(:,:,iblock) * (c1 / 1013.25e+3_r8)
-      AP_USED(:,:,iblock) = AP_USED(:,:,iblock) / c10
-
-      where (LAND_MASK(:,:,iblock))
-        tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock)     = IFRAC_USED(:,:,iblock)
-        tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock)       = XKW_USED(:,:,iblock)
-        tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock) = AP_USED(:,:,iblock)
-      endwhere
-
-      U10   = sqrt(U10_SQR(:,:,iblock)) * 1.e-2_r8 ! cm/s -> m/s
-      USTAR = calc_ustar(LAND_MASK(:,:,iblock), U10, RHO(:,:,iblock))
-      CD    = calc_cdu10(LAND_MASK(:,:,iblock), U10)
-
-      Ne_SOL = ne_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
-        SSS(:,:,iblock))
-      He4_SOL = he4_henry_sol_0(LAND_MASK(:,:,iblock), SST(:,:,iblock), &
-        SSS(:,:,iblock))
-      He_ALPHA_SOL = alpha_sol_he(LAND_MASK(:,:,iblock), SST(:,:,iblock))
-
-      !-----------------------------------------------------------------------
-      !  3He fluxes
-      !-----------------------------------------------------------------------
-
-      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
-
-      where (LAND_MASK(:,:,iblock))
-
-        !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
-        GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
-        SURF_SAT = He4_SOL * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_ind,iblock) +                     &
-          SURF_VALS_CUR(:,:,he3_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
-          log(zw/deltaw)/kappa)
-        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
-        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
-        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
-        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
-          SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
-
-        !---------- Flux due to completely trapped bubbles (pmol/m^3/s) --------
-        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir  * 1.e+12_r8 ! mol -> pmol
-
-        !---------- Flux due to partially trapped bubbles (pmol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
-          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
-        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
-        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
-          - SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
-
-        !---------- equilibrium supersaturation (fraction) ---------------------
-        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
-          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
-
-        !---------- Total gas flux ---------------------------------------------
-        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
-        STF_MODULE(:,:,he3_ind,iblock) = FLUX
 
         !-----------------------------------------------------------------------
-        ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock)      = SCHMIDT
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock)           = KS
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock)           = KB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock) = FLUX_DGE
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock) = FLUX_CTB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock) = FLUX_PTB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock)     = FLUX
-      elsewhere
-        STF_MODULE(:,:,he3_ind,iblock) = c0
-      endwhere
+        !EOC
 
-      !-----------------------------------------------------------------------
-      !  inert 3He fluxes
-      !-----------------------------------------------------------------------
+    end function he4_sol_0
 
-      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock)) / alpha_diff
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: ne_sol_0
+    ! !INTERFACE:
 
-      where (LAND_MASK(:,:,iblock))
+    function ne_sol_0(LAND_MASK, SST, SSS, RHO)
 
-        !---------- Diffusive gas exchange (pmol/m^3/s) -----------------------
-        GAS_PPATM = Xhe * AP_USED(:,:,iblock) * Ir
-        SURF_SAT = He4_SOL * He_ALPHA_SOL * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he3_inert_ind,iblock) +               &
-          SURF_VALS_CUR(:,:,he3_inert_ind,iblock)) / 1.e+12_r8 ! pmol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
-          log(zw/deltaw)/kappa)
-        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
-        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
-        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
-        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
-          SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
+        ! !DESCRIPTION:
+        !  Compute solubility for Ne in mol/(m^3 atm)
+        !  (Hamme & Emerson, DSR I 51, 2004)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-        !---------- Flux due to completely trapped bubbles (pmol/m^3/s) --------
-        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * Ir  * 1.e+12_r8 ! mol -> pmol
+        ! !USES:
 
-        !---------- Flux due to partially trapped bubbles (pmol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
-          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
-        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
-        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
-          - SURF_VAL/SURF_SAT) * 1.e+12_r8 ! mol -> pmol
+        ! !INPUT PARAMETERS:
 
-        !---------- equilibrium supersaturation (fraction) ---------------------
-        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
-          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-        !---------- Total gas flux ---------------------------------------------
-        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
-        STF_MODULE(:,:,he3_inert_ind,iblock) = FLUX
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST, & ! sea surface temperature (C)
+                SSS, & ! sea surface salinity (psu)
+                RHO    ! density (kg/m^3)
+
+        ! !OUTPUT PARAMETERS:
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                ne_sol_0           ! solubility of neon
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        real (r8), parameter ::       &
+                A0  = 2.18156_r8,     &
+                A1  = 1.29108_r8,     &
+                A2  = 2.12504_r8,     &
+                A3  = c0,             &
+                B0  = -5.94737e-3_r8, &
+                B1  = -5.13896e-3_r8, &
+                B2  = c0
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                Ts
 
         !-----------------------------------------------------------------------
-        ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock)      = SCHMIDT
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock)     = SURF_SAT * 1.e+12_r8 ! mol->pmol
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock)           = KS
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock)           = KB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock) = FLUX_DGE
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock) = FLUX_CTB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock) = FLUX_PTB
-        tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock)     = FLUX
-      elsewhere
-        STF_MODULE(:,:,he3_inert_ind,iblock) = c0
-      endwhere
+        !  compute solubility
+        !-----------------------------------------------------------------------
 
-      !-----------------------------------------------------------------------
-      !  4He fluxes
-      !-----------------------------------------------------------------------
-
-      SCHMIDT = schmidt_he4(LAND_MASK(:,:,iblock), SST(:,:,iblock))
-
-      where (LAND_MASK(:,:,iblock))
-
-        !---------- Diffusive gas exchange (mumol/m^3/s) -----------------------
-        GAS_PPATM = Xhe * AP_USED(:,:,iblock)
-        SURF_SAT = He4_SOL * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,he4_ind,iblock) +                     &
-          SURF_VALS_CUR(:,:,he4_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
-          log(zw/deltaw)/kappa)
-        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
-        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
-        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
-        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
-          SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> mumol
-
-        !---------- Flux due to completely trapped bubbles (mumol/m^3/s) --------
-        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xhe * 1.e+6_r8 ! mol -> mumol
-
-        !---------- Flux due to partially trapped bubbles (mumol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
-          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
-        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
-        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
-          - SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> pmol
-
-        !---------- equilibrium supersaturation (fraction) ---------------------
-        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
-          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
-
-        !---------- Total gas flux ---------------------------------------------
-        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
-        STF_MODULE(:,:,he4_ind,iblock) = FLUX
+        where (LAND_MASK)
+            Ts = log((298.15_r8 - SST)/(273.15_r8 + SST))
+            ne_sol_0 = exp(A0 + A1*Ts + A2*Ts**2 + A3*Ts**3 + SSS*(B0 + B1*Ts + B2*Ts**2)) ! nmol/(kg atm)
+            ne_sol_0 = ne_sol_0 * 1.e-9_r8 * RHO ! nmol/(kg atm) -> mol/(m^3 atm)
+        elsewhere
+            ne_sol_0 = c0
+        endwhere
 
         !-----------------------------------------------------------------------
-        ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock)      = SCHMIDT
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock)           = KS
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock)           = KB
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock) = FLUX_DGE
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock) = FLUX_CTB
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock) = FLUX_PTB
-        tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock)     = FLUX
-      elsewhere
-        STF_MODULE(:,:,he4_ind,iblock) = c0
-      endwhere
+        !EOC
 
-      !-----------------------------------------------------------------------
-      !  Ne fluxes
-      !-----------------------------------------------------------------------
+    end function ne_sol_0
 
-      SCHMIDT = schmidt_ne(LAND_MASK(:,:,iblock), SST(:,:,iblock))
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: ar_sol_0
+    ! !INTERFACE:
 
-      where (LAND_MASK(:,:,iblock))
+    function ar_sol_0(LAND_MASK, SST, SSS, RHO)
 
-        !---------- Diffusive gas exchange (mumol/m^3/s) -----------------------
-        GAS_PPATM = Xne * AP_USED(:,:,iblock)
-        SURF_SAT = Ne_SOL * GAS_PPATM ! mol/m^3
-        SURF_VAL = p5*(SURF_VALS_OLD(:,:,ne_ind,iblock) +                      &
-          SURF_VALS_CUR(:,:,ne_ind,iblock)) / 1.e+6_r8 ! mumol -> mol
-        RW = sqrt(RHO(:,:,iblock)/rhoair) * (hw * sqrt(SCHMIDT) +              &
-          log(zw/deltaw)/kappa)
-        RA = ha * sqrt(Sca) + c1/sqrt(CD) - c5 + log(Sca)/(c2*kappa)
-        ALPHA = SURF_SAT / Patm * R * (SST(:,:,iblock) + T0_Kelvin)
-        KS = USTAR / (RW + ALPHA * RA) * (c1 - IFRAC_USED(:,:,iblock))
-        FLUX_DGE = KS * SURF_SAT * (AP_USED(:,:,iblock)/Patm -                 &
-          SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> mumol
+        ! !DESCRIPTION:
+        !  Compute solubility for Ar in mol/(m^3 atm)
+        !  (Hamme & Emerson, DSR I 51, 2004)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-        !---------- Flux due to completely trapped bubbles (mumol/m^3/s) --------
-        FLUX_CTB = 5.56_r8 * USTAR**3.86_r8 * Xne * 1.e+6_r8 ! mol -> mumol
+        ! !USES:
 
-        !---------- Flux due to partially trapped bubbles (mumol/m^3/s) ---------
-        KB = 1.98e+6_r8 * USTAR**2.76_r8 * (SCHMIDT/660.0_r8)**(-2.0_r8/3.0_r8) &
-          * 1.e-2_r8/360.0_r8 ! cm/hr -> m
-        DELTA_P =  152.55_r8  * USTAR**1.06_r8 / 100.0_r8   ! % -> fraction
-        FLUX_PTB = KB * SURF_SAT * ((c1 + DELTA_P) * AP_USED(:,:,iblock)/Patm &
-          - SURF_VAL/SURF_SAT) * 1.e+6_r8 ! mol -> pmol
+        ! !INPUT PARAMETERS:
 
-        !---------- equilibrium supersaturation (fraction) ---------------------
-        DELTA_EQ = (KB * SURF_VAL * DELTA_P * AP_USED(:,:,iblock)/Patm + FLUX_CTB) &
-          / ((KB + KS) * SURF_VAL * AP_USED(:,:,iblock)/Patm)
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-        !---------- Total gas flux ---------------------------------------------
-        FLUX = FLUX_DGE + FLUX_CTB + FLUX_PTB
-        STF_MODULE(:,:,ne_ind,iblock) = FLUX
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST, & ! sea surface temperature (C)
+                SSS, & ! sea surface salinity (psu)
+                RHO    ! density (kg/m^3)
+
+        ! !OUTPUT PARAMETERS:
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                ar_sol_0           ! solubility of argon
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        real (r8), parameter ::       &
+                A0  = 2.79150_r8,     &
+                A1  = 3.17609_r8,     &
+                A2  = 4.13116_r8,     &
+                A3  = 4.90379_r8,     &
+                B0  = -6.96233e-3_r8, &
+                B1  = -7.66670e-3_r8, &
+                B2  = -1.16888e-2_r8
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                Ts
 
         !-----------------------------------------------------------------------
-        ! store tavg
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock)      = SCHMIDT
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock)     = SURF_SAT * 1.e+6_r8 ! mol->mumol
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock)           = KS
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock)           = KB
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock) = FLUX_DGE
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock) = FLUX_CTB
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock) = FLUX_PTB
-        tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock)     = FLUX
-      elsewhere
-        STF_MODULE(:,:,ne_ind,iblock) = c0
-      endwhere
+        !  compute solubility
+        !-----------------------------------------------------------------------
 
-    end do
+        where (LAND_MASK)
+            Ts = log((298.15_r8 - SST)/(273.15_r8 + SST))
+            ar_sol_0 = exp(A0 + A1*Ts + A2*Ts**2 + A3*Ts**3 + SSS*(B0 + B1*Ts + B2*Ts**2)) ! nmol/(kg atm)
+            ar_sol_0 = ar_sol_0 * 1.e-6_r8 * RHO ! mumol/(kg atm) -> mol/(m^3 atm)
+        elsewhere
+            ar_sol_0 = c0
+        endwhere
 
-    call timer_stop(tr3he_sflux_timer)
+        !-----------------------------------------------------------------------
+        !EOC
 
-    !-----------------------------------------------------------------------
-    !EOC
+    end function ar_sol_0
 
-  end subroutine tr3he_set_sflux
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: alpha_sol_he
+    ! !INTERFACE:
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_set_interior
-  ! !INTERFACE:
+    function alpha_sol_he(LAND_MASK, SST)
 
-  subroutine tr3he_set_interior(k, TRACER_MODULE_OLD, TRACER_MODULE_CUR, &
-    DTRACER_MODULE, this_block)
+        ! !DESCRIPTION:
+        !  Temperature-dependent solubility fractionation factor for He
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !DESCRIPTION:
-    !  Compute time derivatives for tritium and helium 3
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !USES:
 
-    ! !USES:
+        ! !INPUT PARAMETERS:
 
-    use grid, only: KMT
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    ! !INPUT PARAMETERS:
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST                ! sea surface temperature (C)
 
-    integer(int_kind), intent(in) :: &
-      k                    ! vertical level index
+        ! !OUTPUT PARAMETERS:
 
-    real (r8), dimension(nx_block,ny_block,km,tr3he_tracer_cnt), intent(in) :: &
-      TRACER_MODULE_OLD, & ! old tracer values
-      TRACER_MODULE_CUR    ! current tracer values
+        real (r8), dimension(nx_block,ny_block) :: &
+                alpha_sol_he       ! solubility fractionation factor
 
-    type (block), intent(in) :: &
-      this_block          ! block info for the current block
+        !-----------------------------------------------------------------------
 
-    ! !OUTPUT PARAMETERS:
+        where (LAND_MASK)
+            alpha_sol_he = 0.98144_r8 + 8.666e-5_r8 * SST
+        elsewhere
+            alpha_sol_he = c0
+        endwhere
 
-    real(r8), dimension(nx_block,ny_block,tr3he_tracer_cnt), intent(out) :: &
-      DTRACER_MODULE       ! computed source/sink term
+        !-----------------------------------------------------------------------
+        !EOC
 
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+    end function alpha_sol_he
 
-    character(*), parameter :: &
-      subname = 'tr3he_mod:tr3he_set_interior'
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: schmidt_he4
+    ! !INTERFACE:
 
-    real (r8), parameter ::         &
-      spd    = 86400.0_r8,          & ! number of seconds in a day
-      spy    = 365.0_r8*spd,        & ! number of seconds in a year
-      hlife  = 12.31_r8,            & ! tritium half-life in years
-      lambda = -log(p5)/(hlife*spy)   ! tritium decay constant (1/sec)
+    function schmidt_he4(LAND_MASK, SST)
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      tritium_loc,  & ! local copy of model tritium
-      helium3_loc,  & ! local copy of model helium 3
-      TRITIUM_DECAY   ! tritium decay term
+        ! !DESCRIPTION:
+        !  Compute Schmidt number for helium 4 (Wanninkhof 1992)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    integer (int_kind) :: &
-      bid             ! local_block id
+        ! !USES:
 
-    !-----------------------------------------------------------------------
+        ! !INPUT PARAMETERS:
 
-    bid = this_block%local_id
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    DTRACER_MODULE = c0
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST                ! sea surface temperature (C)
 
-    !-----------------------------------------------------------------------
-    !  create local copies of model tracers
-    !  treat negative values as zero
-    !-----------------------------------------------------------------------
+        ! !OUTPUT PARAMETERS:
 
-    tritium_loc = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,tr_ind) + &
-      TRACER_MODULE_CUR(:,:,k,tr_ind)))
-    !   helium3_loc = max(c0, p5*(TRACER_MODULE_OLD(:,:,k,he3_ind) + &
-    !     TRACER_MODULE_CUR(:,:,k,he3_ind)))
+        real (r8), dimension(nx_block,ny_block) :: &
+                schmidt_he4       ! Schmidt number for helium 4
 
-    !-----------------------------------------------------------------------
-    !  apply LAND_MASK to local copies
-    !-----------------------------------------------------------------------
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    where (.not. LAND_MASK(:,:,bid) .or. k > KMT(:,:,bid))
-      tritium_loc = c0
-      !helium3_loc = c0
-    end where
+        real (r8), parameter ::  &
+                A = 410.14_r8,   &
+                B = 20.503_r8,   &
+                C = 0.53175_r8,  &
+                D = 0.0060111_r8
 
-    !-----------------------------------------------------------------------
-    !  compute time derivatives
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
 
-    TRITIUM_DECAY = lambda * tritium_loc
-    DTRACER_MODULE(:,:,tr_ind)  = -TRITIUM_DECAY
-    DTRACER_MODULE(:,:,he3_ind) = TRITIUM_DECAY
+        where (LAND_MASK)
+            schmidt_he4 = A - B*SST + C*SST**2 - D*SST**3
+        elsewhere
+            schmidt_he4 = c0
+        endwhere
 
-    call accumulate_tavg_field(TRITIUM_DECAY, tavg_TRITIUM_DECAY,bid,k)
+        !-----------------------------------------------------------------------
+        !EOC
 
-    !-----------------------------------------------------------------------
-    !EOC
+    end function schmidt_he4
 
-  end subroutine tr3he_set_interior
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: schmidt_ne
+    ! !INTERFACE:
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: ne_sol_0
-  ! !INTERFACE:
+    function schmidt_ne(LAND_MASK, SST)
 
-  function ne_sol_0(LAND_MASK, SST, SSS)
+        ! !DESCRIPTION:
+        !  Compute Schmidt number for neon (Wanninkhof 1992)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !DESCRIPTION:
-    !  Compute solubility for Ne in mol/(m^3 Pa)
-    !  (Hamme & Emerson, DSR I 51, 2004)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !USES:
 
-    ! !USES:
+        ! !INPUT PARAMETERS:
 
-    ! !INPUT PARAMETERS:
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST                ! sea surface temperature (C)
 
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST,             & ! sea surface temperature (C)
-      SSS                ! sea surface salinity (psu)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      ne_sol_0           ! solubility of neon
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+        ! !OUTPUT PARAMETERS:
 
-    real (r8), parameter :: &
-      A0  = 2.18156_r8,     &
-      A1  = 1.29108_r8,     &
-      A2  = 2.12504_r8,     &
-      A3  = c0,             &
-      B0  = -5.94737e-3_r8, &
-      B1  = -5.13896e-3_r8, &
-      B2  = c0
+        real (r8), dimension(nx_block,ny_block) :: &
+                schmidt_ne       ! Schmidt number for neon
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      Ts
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    !-----------------------------------------------------------------------
-    !  compute solubility
-    !-----------------------------------------------------------------------
+        real (r8), parameter :: &
+                A = 855.1_r8,   &
+                B = 46.299_r8,  &
+                C = 1.254_r8,   &
+                D = 0.01449_r8
 
-    where (LAND_MASK)
-      Ts = log((298.15_r8 - SST)/(273.15_r8 + SST))
-      ne_sol_0 = exp(A0 + A1*Ts + A2*Ts**2 + A3*Ts**3 + SSS*(B0 + B1*Ts + B2*Ts**2)) ! nmol/(kg atm)
-      ne_sol_0 = ne_sol_0 * 1.e-9 * rho_sw * c1000 / (Patm * Xne) ! nmol/(kg atm) -> mol/(m^3 Pa)
-    elsewhere
-      ne_sol_0 = c0
-    endwhere
+        !-----------------------------------------------------------------------
 
-    !-----------------------------------------------------------------------
-    !EOC
+        where (LAND_MASK)
+            schmidt_ne = A - B*SST + C*SST**2 - D*SST**3
+        elsewhere
+            schmidt_ne = c0
+        endwhere
 
-  end function ne_sol_0
+        !-----------------------------------------------------------------------
+        !EOC
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: he4_bunsen_sol_0
-  ! !INTERFACE:
+    end function schmidt_ne
 
-  function he4_bunsen_sol_0(LAND_MASK, SST, SSS)
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: schmidt_ar
+    ! !INTERFACE:
 
-    ! !DESCRIPTION:
-    !  Compute the Bunsen solubility coefficient for helium 4
-    !  Ref : Weiss (1971), Journal of Chemical & Engineering Data
-    !        Vol 16, No. 2 (Table II and Equation 1)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+    function schmidt_ar(LAND_MASK, SST)
 
-    ! !USES:
+        ! !DESCRIPTION:
+        !  Compute Schmidt number for argon (Wanninkhof 1992)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !INPUT PARAMETERS:
+        ! !USES:
 
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
+        ! !INPUT PARAMETERS:
 
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST,             & ! sea surface temperature (C)
-      SSS                ! sea surface salinity (psu)
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    ! !OUTPUT PARAMETERS:
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST                ! sea surface temperature (C)
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      he4_bunsen_sol_0           ! Bunsen solubility of helium 4
+        ! !OUTPUT PARAMETERS:
 
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+        real (r8), dimension(nx_block,ny_block) :: &
+                schmidt_ar       ! Schmidt number for argon
 
-    real (r8), parameter ::   &
-      A1  = -34.6261_r8,      &
-      A2  =  43.0285_r8,      &
-      A3  =  14.1391_r8,      &
-      B1  = -0.042340_r8,     &
-      B2  =  0.022624_r8,     &
-      B3  = -0.003312_r8
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      Tk     ! sea surface temperature in Kelvin
+        real (r8), parameter :: &
+                A = 1909.1_r8,  &
+                B = 125.09_r8,  &
+                C = 3.9012_r8,  &
+                D = 0.048953_r8
 
-    !-----------------------------------------------------------------------
-    !  compute Bunsen solubility as in Weiss 1971
-    !-----------------------------------------------------------------------
+        !-----------------------------------------------------------------------
 
-    where (LAND_MASK)
-      Tk = SST + T0_Kelvin
-      he4_bunsen_sol_0 = exp(A1 + A2 * 100.0_r8/Tk + A3 * log(Tk/100.0_r8) &
-        + SSS * (B1 + B2 * Tk/100.0_r8 + B3 * (Tk/100.0_r8)**2))
-    elsewhere
-      he4_bunsen_sol_0 = c0
-    endwhere
+        where (LAND_MASK)
+            schmidt_ar = A - B*SST + C*SST**2 - D*SST**3
+        elsewhere
+            schmidt_ar = c0
+        endwhere
 
-    !-----------------------------------------------------------------------
-    !EOC
+        !-----------------------------------------------------------------------
+        !EOC
 
-  end function he4_bunsen_sol_0
+    end function schmidt_ar
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: he4_henry_sol_0
-  ! !INTERFACE:
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: diff_he4
+    ! !INTERFACE:
 
-  function he4_henry_sol_0(LAND_MASK, SST, SSS)
+    function diff_he4(LAND_MASK, SST)
 
-    ! !DESCRIPTION:
-    !  Compute the Henry's Law solubility coefficient for helium 4 in mol/(m^3 Pa)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !DESCRIPTION:
+        !  Compute diffusivity coefficient for helium 4 in m^2/s
+        !  Jahne et al. JGR 92 C10 (1987)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !USES:
+        ! !USES:
 
-    ! !INPUT PARAMETERS:
+        ! !INPUT PARAMETERS:
 
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST,             & ! sea surface temperature (C)
-      SSS                ! sea surface salinity (psu)
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                SST                ! sea surface temperature (C)
 
-    ! !OUTPUT PARAMETERS:
+        ! !OUTPUT PARAMETERS:
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      he4_henry_sol_0    ! Henry's Law solubility coefficient of helium 4
+        real (r8), dimension(nx_block,ny_block) :: &
+                diff_he4           ! diffusivity coefficient
 
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      Bsol     ! Bunsen solubility
+        real (r8), parameter :: &
+                A = 818.e-9_r8, & ! m^2/s
+                E = 11.70e+3_r8   ! kJ/mol -> J/mol = (Pa*m^3)/mol
 
-    !-----------------------------------------------------------------------
-    !  compute Bunsen solubility as in Weiss 1971
-    !-----------------------------------------------------------------------
+        real (r8), dimension(nx_block,ny_block) :: &
+                Tk                     ! sea surface temperature in Kelvin
 
-    Bsol = he4_bunsen_sol_0(LAND_MASK, SST, SSS)
+        !-----------------------------------------------------------------------
 
-    !-----------------------------------------------------------------------
-    !  convert Bunsen solubility to Henry's law coefficient (mol/(m^3 Pa))
-    !-----------------------------------------------------------------------
+        where (LAND_MASK)
+            Tk = SST + T0_Kelvin
+            diff_he4 = A * exp(-E/(R*Tk))
+        elsewhere
+            diff_he4 = c0
+        endwhere
 
-    where (LAND_MASK)
-      he4_henry_sol_0 = Bsol / (R * T0_Kelvin)
-    elsewhere
-      he4_henry_sol_0 = c0
-    endwhere
+        !-----------------------------------------------------------------------
+        !EOC
 
-    !-----------------------------------------------------------------------
-    !EOC
+    end function diff_he4
 
-  end function he4_henry_sol_0
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: calc_cdu10
+    ! !INTERFACE:
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: alpha_sol_he
-  ! !INTERFACE:
+    function calc_cdu10(LAND_MASK, U10) result(cd)
 
-  function alpha_sol_he(LAND_MASK, SST)
+        ! !DESCRIPTION:
+        !  Compute drag coefficient from u10
+        !  Large & Pond JPO, 11 (1981)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !DESCRIPTION:
-    !  Temperature-dependent solubility fractionation factor for He
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !USES:
 
-    ! !USES:
+        ! !INPUT PARAMETERS:
 
-    ! !INPUT PARAMETERS:
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-    LAND_MASK          ! land mask for this block
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                U10                ! wind speed at 10 m (m/s)
 
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST                ! sea surface temperature (C)
+        ! !OUTPUT PARAMETERS:
 
-    ! !OUTPUT PARAMETERS:
+        real (r8), dimension(nx_block,ny_block) :: &
+                cd                ! drag coefficient
 
-    real (r8), dimension(nx_block,ny_block) :: &
-      alpha_sol_he       ! solubility fractionation factor
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
 
-    !-----------------------------------------------------------------------
+        where (LAND_MASK)
+            cd = (0.49_r8 + 0.065_r8 * U10) * 1.e-3_r8
+            where(U10<=11) cd = 0.0012_r8
+            where(U10>=20) cd = 0.0018_r8
+        elsewhere
+            cd = c0
+        endwhere
 
-    where (LAND_MASK)
-      alpha_sol_he = 0.98144_r8 + 8.666e-5_r8 * SST
-    elsewhere
-      alpha_sol_he = c0
-    endwhere
+        !-----------------------------------------------------------------------
+        !EOC
 
-    !-----------------------------------------------------------------------
-    !EOC
+    end function calc_cdu10
 
-  end function alpha_sol_he
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: calc_ustar
+    ! !INTERFACE:
 
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: schmidt_he4
-  ! !INTERFACE:
+    function calc_ustar(LAND_MASK, U10, RHO) result(ustar)
 
-  function schmidt_he4(LAND_MASK, SST)
+        ! !DESCRIPTION:
+        !  Compute friction velocity from u10 and sea water density (rhosw in kg/m^3)
+        !  Liang et al GBC 27:894-905 (2013)
+        !
+        ! !REVISION HISTORY:
+        !  same as module
 
-    ! !DESCRIPTION:
-    !  Compute Schmidt number for helium 4 (Wanninkhof 1992)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
+        ! !USES:
 
-    ! !USES:
+        ! !INPUT PARAMETERS:
 
-    ! !INPUT PARAMETERS:
+        logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
+                LAND_MASK          ! land mask for this block
 
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
-
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST                ! sea surface temperature (C)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      schmidt_he4       ! Schmidt number for helium 4
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    real (r8), parameter :: &
-      A = 410.14_r8,        &
-      B = 20.503_r8,        &
-      C = 0.53175_r8,       &
-      D = 0.0060111_r8
-
-    !-----------------------------------------------------------------------
-
-    where (LAND_MASK)
-      schmidt_he4 = A - B*SST + C*SST**2 - D*SST**3
-    elsewhere
-      schmidt_he4 = c0
-    endwhere
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end function schmidt_he4
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: schmidt_ne
-  ! !INTERFACE:
-
-  function schmidt_ne(LAND_MASK, SST)
-
-    ! !DESCRIPTION:
-    !  Compute Schmidt number for neon (Wanninkhof 1992)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
-
-    ! !USES:
-
-    ! !INPUT PARAMETERS:
-
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
-
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST                ! sea surface temperature (C)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      schmidt_ne       ! Schmidt number for neon
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    real (r8), parameter :: &
-      A = 855.1_r8,         &
-      B = 46.299_r8,        &
-      C = 1.254_r8,         &
-      D = 0.01449_r8
-
-    !-----------------------------------------------------------------------
-
-    where (LAND_MASK)
-      schmidt_ne = A - B*SST + C*SST**2 - D*SST**3
-    elsewhere
-      schmidt_ne = c0
-    endwhere
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end function schmidt_ne
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: diff_he4
-  ! !INTERFACE:
-
-  function diff_he4(LAND_MASK, SST)
-
-    ! !DESCRIPTION:
-    !  Compute diffusivity coefficient for helium 4 in m^2/s
-    !  Jahne et al. JGR 92 C10 (1987)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
-
-    ! !USES:
-
-    ! !INPUT PARAMETERS:
-
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
-
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      SST                ! sea surface temperature (C)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      diff_he4           ! diffusivity coefficient
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    real (r8), parameter :: &
-      A = 818.e-9_r8,       & ! m^2/s
-      E = 11.70e+3_r8         ! kJ/mol -> J/mol = (Pa*m^3)/mol
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      Tk                     ! sea surface temperature in Kelvin
-
-    !-----------------------------------------------------------------------
-
-    where (LAND_MASK)
-      Tk = SST + T0_Kelvin
-      diff_he4 = A * exp(-E/(R*Tk))
-    elsewhere
-      diff_he4 = c0
-    endwhere
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end function diff_he4
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: calc_cdu10
-  ! !INTERFACE:
-
-  function calc_cdu10(LAND_MASK, U10) result(cd)
-
-    ! !DESCRIPTION:
-    !  Compute drag coefficient from u10
-    !  Large & Pond JPO, 11 (1981)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
-
-    ! !USES:
-
-    ! !INPUT PARAMETERS:
-
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
-
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      U10                ! wind speed at 10 m (m/s)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      cd                ! drag coefficient
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-
-    where (LAND_MASK)
-      cd = (0.49_r8 + 0.065_r8 * U10) * 1.e-3_r8
-      where(U10<=11) cd = 0.0012_r8
-      where(U10>=20) cd = 0.0018_r8
-    elsewhere
-      cd = c0
-    endwhere
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end function calc_cdu10
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: calc_ustar
-  ! !INTERFACE:
-
-  function calc_ustar(LAND_MASK, U10, RHO) result(ustar)
-
-    ! !DESCRIPTION:
-    !  Compute friction velocity from u10 and sea water density (rhosw in kg/m^3)
-    !  Liang et al GBC 27:894-905 (2013)
-    !
-    ! !REVISION HISTORY:
-    !  same as module
-
-    ! !USES:
-
-    ! !INPUT PARAMETERS:
-
-    logical (log_kind), dimension(nx_block,ny_block), intent(in) :: &
-      LAND_MASK          ! land mask for this block
-
-    real (r8), dimension(nx_block,ny_block), intent(in) :: &
-      U10,             & ! wind speed at 10 m (m/s)
-      RHO                ! surface water density (kg/m^3)
-
-    ! !OUTPUT PARAMETERS:
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      ustar                ! friction velocity
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    real (r8), dimension(nx_block,ny_block) :: &
-      cd                     ! drag coefficient
-
-    !-----------------------------------------------------------------------
-
-    where (LAND_MASK)
-      cd    = calc_cdu10(LAND_MASK,U10)
-      ustar = sqrt(rhoair/RHO * cd) * U10
-    elsewhere
-      ustar = c0
-    endwhere
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end function calc_ustar
-
-  !***********************************************************************
-  !BOP
-  ! !IROUTINE: tr3he_tavg_forcing
-  ! !INTERFACE:
-
-  subroutine tr3he_tavg_forcing
-
-    ! !DESCRIPTION:
-    !  Make accumulation calls for forcing related tavg fields. This is
-    !  necessary because the forcing routines are called before tavg flags
-    !  are set.
-
-    ! !REVISION HISTORY:
-    !  same as module
-
-    !EOP
-    !BOC
-    !-----------------------------------------------------------------------
-    !  local variables
-    !-----------------------------------------------------------------------
-
-    integer (int_kind) :: &
-      iblock              ! block loop index
-
-    !-----------------------------------------------------------------------
-
-    !$OMP PARALLEL DO PRIVATE(iblock)
-
-    do iblock = 1, nblocks_clinic
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock),            &
-        tavg_tr3He_IFRAC,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock),              &
-        tavg_tr3He_XKW,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock),        &
-        tavg_tr3He_ATM_PRESS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock),            &
-        tavg_3He_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock),                 &
-        tavg_3He_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock),                 &
-        tavg_3He_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock),           &
-        tavg_3He_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock),           &
-        tavg_3He_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock),       &
-        tavg_3He_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock),       &
-        tavg_3He_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock),       &
-        tavg_3He_GAS_FLUX_PTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock),      &
-        tavg_3He_inert_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock),           &
-        tavg_3He_inert_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock),           &
-        tavg_3He_inert_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock),     &
-        tavg_3He_inert_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock),     &
-        tavg_3He_inert_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock), &
-        tavg_3He_inert_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock), &
-        tavg_3He_inert_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock), &
-        tavg_3He_inert_GAS_FLUX_PTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock),            &
-        tavg_4He_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock),                 &
-        tavg_4He_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock),                 &
-        tavg_4He_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock),           &
-        tavg_4He_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock),           &
-        tavg_4He_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock),       &
-        tavg_4He_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock),       &
-        tavg_4He_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock),       &
-           tavg_4He_GAS_FLUX_PTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock),             &
-        tavg_Ne_SCHMIDT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock),                  &
-        tavg_Ne_KS,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock),                  &
-        tavg_Ne_KB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock),            &
-        tavg_Ne_SURF_SAT,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock),            &
-        tavg_Ne_GAS_FLUX,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock),        &
-        tavg_Ne_GAS_FLUX_DGE,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock),        &
-        tavg_Ne_GAS_FLUX_CTB,iblock,1)
-      call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock),        &
-        tavg_Ne_GAS_FLUX_PTB,iblock,1)
-    end do
-
-    !$OMP END PARALLEL DO
-
-    !-----------------------------------------------------------------------
-    !EOC
-
-  end subroutine tr3he_tavg_forcing
-
-!***********************************************************************
+        real (r8), dimension(nx_block,ny_block), intent(in) :: &
+                U10, & ! wind speed at 10 m (m/s)
+                RHO    ! surface water density (kg/m^3)
+
+        ! !OUTPUT PARAMETERS:
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                ustar                ! friction velocity
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                cd                     ! drag coefficient
+
+        !-----------------------------------------------------------------------
+
+        where (LAND_MASK)
+            cd    = calc_cdu10(LAND_MASK,U10)
+            ustar = sqrt(rho_air/RHO * cd) * U10
+        elsewhere
+            ustar = c0
+        endwhere
+
+        !-----------------------------------------------------------------------
+        !EOC
+
+    end function calc_ustar
+
+    !***********************************************************************
+    !BOP
+    ! !IROUTINE: tr3he_tavg_forcing
+    ! !INTERFACE:
+
+    subroutine tr3he_tavg_forcing
+
+        ! !DESCRIPTION:
+        !  Make accumulation calls for forcing related tavg fields. This is
+        !  necessary because the forcing routines are called before tavg flags
+        !  are set.
+
+        ! !REVISION HISTORY:
+        !  same as module
+
+        !EOP
+        !BOC
+        !-----------------------------------------------------------------------
+        !  local variables
+        !-----------------------------------------------------------------------
+
+        integer (int_kind) :: &
+                iblock              ! block loop index
+
+        !-----------------------------------------------------------------------
+
+        !$OMP PARALLEL DO PRIVATE(iblock)
+
+        do iblock = 1, nblocks_clinic
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_IFRAC,iblock),            &
+                    tavg_tr3He_IFRAC,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_XKW,iblock),              &
+                    tavg_tr3He_XKW,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_tr3He_ATM_PRESS,iblock),        &
+                    tavg_tr3He_ATM_PRESS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SCHMIDT,iblock),            &
+                    tavg_3He_SCHMIDT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KS,iblock),                 &
+                    tavg_3He_KS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_KB,iblock),                 &
+                    tavg_3He_KB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_SURF_SAT,iblock),           &
+                    tavg_3He_SURF_SAT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX,iblock),           &
+                    tavg_3He_GAS_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_DGE,iblock),       &
+                    tavg_3He_GAS_FLUX_DGE,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_CTB,iblock),       &
+                    tavg_3He_GAS_FLUX_CTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_GAS_FLUX_PTB,iblock),       &
+                    tavg_3He_GAS_FLUX_PTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SCHMIDT,iblock),      &
+                    tavg_3He_inert_SCHMIDT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KS,iblock),           &
+                    tavg_3He_inert_KS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_KB,iblock),           &
+                    tavg_3He_inert_KB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_SURF_SAT,iblock),     &
+                    tavg_3He_inert_SURF_SAT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX,iblock),     &
+                    tavg_3He_inert_GAS_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_DGE,iblock), &
+                    tavg_3He_inert_GAS_FLUX_DGE,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_CTB,iblock), &
+                    tavg_3He_inert_GAS_FLUX_CTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_3He_inert_GAS_FLUX_PTB,iblock), &
+                    tavg_3He_inert_GAS_FLUX_PTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SCHMIDT,iblock),            &
+                    tavg_4He_SCHMIDT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KS,iblock),                 &
+                    tavg_4He_KS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_KB,iblock),                 &
+                    tavg_4He_KB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_SURF_SAT,iblock),           &
+                    tavg_4He_SURF_SAT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX,iblock),           &
+                    tavg_4He_GAS_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_DGE,iblock),       &
+                    tavg_4He_GAS_FLUX_DGE,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_CTB,iblock),       &
+                    tavg_4He_GAS_FLUX_CTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_4He_GAS_FLUX_PTB,iblock),       &
+                    tavg_4He_GAS_FLUX_PTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SCHMIDT,iblock),             &
+                    tavg_Ne_SCHMIDT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KS,iblock),                  &
+                    tavg_Ne_KS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_KB,iblock),                  &
+                    tavg_Ne_KB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_SURF_SAT,iblock),            &
+                    tavg_Ne_SURF_SAT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX,iblock),            &
+                    tavg_Ne_GAS_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_DGE,iblock),        &
+                    tavg_Ne_GAS_FLUX_DGE,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_CTB,iblock),        &
+                    tavg_Ne_GAS_FLUX_CTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ne_GAS_FLUX_PTB,iblock),        &
+                    tavg_Ne_GAS_FLUX_PTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_SCHMIDT,iblock),             &
+                    tavg_Ar_SCHMIDT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_KS,iblock),                  &
+                    tavg_Ar_KS,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_KB,iblock),                  &
+                    tavg_Ar_KB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_SURF_SAT,iblock),            &
+                    tavg_Ar_SURF_SAT,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX,iblock),            &
+                    tavg_Ar_GAS_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_DGE,iblock),        &
+                    tavg_Ar_GAS_FLUX_DGE,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_CTB,iblock),        &
+                    tavg_Ar_GAS_FLUX_CTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Ar_GAS_FLUX_PTB,iblock),        &
+                    tavg_Ar_GAS_FLUX_PTB,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock),           &
+                    tavg_Tr_FLUX_EVAP,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock),           &
+                    tavg_Tr_FLUX_PREC,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock),                &
+                    tavg_Tr_FLUX,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock),                     &
+                    tavg_HQ,iblock,1)
+        end do
+
+        !$OMP END PARALLEL DO
+
+        !-----------------------------------------------------------------------
+        !EOC
+
+    end subroutine tr3he_tavg_forcing
+
+    !***********************************************************************
 
 end module tr3he_mod
 
