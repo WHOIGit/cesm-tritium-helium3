@@ -188,6 +188,8 @@ module tr3he_mod
             tavg_Ar_GAS_FLUX_PTB,         bufind_Ar_GAS_FLUX_PTB,        & ! tavg id for Ar partially trapped bubbles
             tavg_Ar_GAS_FLUX,             bufind_Ar_GAS_FLUX,            & ! tavg id for Ar total gas flux
             tavg_Tr_FLUX_EVAP,            bufind_Tr_FLUX_EVAP,           & ! tavg id for tritium flux due to evaporation
+            tavg_Tr_FLUX_EVAP_UP,         bufind_Tr_FLUX_EVAP_UP,        & ! tavg id for tritium upward flux due to evaporation
+            tavg_Tr_FLUX_EVAP_DOWN,       bufind_Tr_FLUX_EVAP_DOWN,      & ! tavg id for tritium downward flux due to evaporation
             tavg_Tr_FLUX_PREC,            bufind_Tr_FLUX_PREC,           & ! tavg id for tritium flux due to precipitation
             tavg_Tr_FLUX,                 bufind_Tr_FLUX,                & ! tavg id for total tritium surface flux
             tavg_HQ,                      bufind_HQ                        ! tavg id for ratio of abs humidities (QATM/QSAT)
@@ -833,48 +835,48 @@ contains
         !-----------------------------------------------------------------------
 
         call define_tavg_field(tavg_Ar_SCHMIDT,'ARGON_SCHMIDT',2, &
-                long_name='Ar Schmidt number',                   &
+                long_name='Ar Schmidt number',                    &
                 units='none', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_SCHMIDT = var_cnt
 
-        call define_tavg_field(tavg_Ar_KS,'ARGON_KS',2,                       &
+        call define_tavg_field(tavg_Ar_KS,'ARGON_KS',2,                      &
                 long_name='Ar transfer velocity for diffusive gas exchange', &
                 units='m/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_KS = var_cnt
 
-        call define_tavg_field(tavg_Ar_KB,'ARGON_KB',2,              &
+        call define_tavg_field(tavg_Ar_KB,'ARGON_KB',2,             &
                 long_name='Ar transfer velocity for large bubbles', &
                 units='m/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_KB = var_cnt
 
         call define_tavg_field(tavg_Ar_SURF_SAT,'ARGON_SURF_SAT',2, &
-                long_name='Ar saturation',                         &
+                long_name='Ar saturation',                          &
                 units='mmol/m^3', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_SURF_SAT = var_cnt
 
         call define_tavg_field(tavg_Ar_GAS_FLUX,'STF_ARGON',2, &
-                long_name='Ar surface gas flux',              &
+                long_name='Ar surface gas flux',               &
                 units='mmol/m^2/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_GAS_FLUX = var_cnt
 
-        call define_tavg_field(tavg_Ar_GAS_FLUX_DGE,'STF_ARGON_DGE',2,     &
+        call define_tavg_field(tavg_Ar_GAS_FLUX_DGE,'STF_ARGON_DGE',2,    &
                 long_name='Ar surface flux due to difusive gas exchange', &
                 units='mmol/m^2/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_GAS_FLUX_DGE = var_cnt
 
-        call define_tavg_field(tavg_Ar_GAS_FLUX_CTB,'STF_ARGON_CTB',2,          &
+        call define_tavg_field(tavg_Ar_GAS_FLUX_CTB,'STF_ARGON_CTB',2,         &
                 long_name='Ar surface flux due to completely trapped bubbles', &
                 units='mmol/m^2/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Ar_GAS_FLUX_CTB = var_cnt
 
-        call define_tavg_field(tavg_Ar_GAS_FLUX_PTB,'STF_ARGON_PTB',2,         &
+        call define_tavg_field(tavg_Ar_GAS_FLUX_PTB,'STF_ARGON_PTB',2,        &
                 long_name='Ar surface flux due to partially trapped bubbles', &
                 units='mmol/m^2/s', grid_loc='2110')
         var_cnt = var_cnt+1
@@ -887,6 +889,18 @@ contains
                 units='pmol/m^2/s', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Tr_FLUX_EVAP = var_cnt
+
+        call define_tavg_field(tavg_Tr_FLUX_EVAP_UP,'STF_TRITIUM_EVAP_UP',2, &
+                long_name='upward 3H vapor flux',                            &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX_EVAP_UP = var_cnt
+
+        call define_tavg_field(tavg_Tr_FLUX_EVAP_DOWN,'STF_TRITIUM_EVAP_DOWN',2, &
+                long_name='downward 3H vapor flux',                              &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX_EVAP_DOWN = var_cnt
 
         call define_tavg_field(tavg_Tr_FLUX_PREC,'STF_TRITIUM_PREC',2, &
                 long_name='3H surface flux due to precipitation',      &
@@ -1139,32 +1153,34 @@ contains
                 AP_USED       ! used atm pressure (converted from dyne/cm**2 to atm)
 
         real (r8), dimension(nx_block,ny_block) :: &
-                SURF_VAL,     & ! filtered surface tracer values
-                SCHMIDT,      & ! gas Schmidt number
-                GAS_SOL,      & ! gas solubility (mol/m^3/atm)
-                SURF_SAT,     & ! gas surface saturation
-                He_ALPHA_SOL, & ! helium temperature-dependent solubility fractionation
-                KS,           & ! tranfer velocity for diffusive gas exchange (m/s)
-                KB,           & ! transfer velocity for large bubbles (m/s)
-                FLUX_DGE,     & ! flux due to difusive gas exchange
-                FLUX_CTB,     & ! flux due to completely trapped bubbles
-                FLUX_PTB,     & ! flux due to partially trapped bubbles
-                FLUX,         & ! total gas flux
-                FLUX_EVAP,    & ! tritium flux due to evaporation (pmol/m^2/s)
-                FLUX_PREC,    & ! tritium flux due to precipitation (pmol/m^2/s)
-                U10,          & ! wind speed at 10 m (m/s)
-                USTAR,        & ! water friction velocity (m/s)
-                UA_STAR,      & ! atmospheric friction velocity (m/s)
-                CD,           & ! drag coefficient
-                RW,           & ! water-side resistance to tranfer
-                RA,           & ! air-side resistance to transfer
-                ALPHA,        & ! dimensionless diffusivity
-                DELTA_P,      & ! supersaturation due to partially dissolved bubbles
-                DELTA_EQ,     & ! equilibrium supersaturation
-                QATM,         & ! air absolute humidity (kg/m^3)
-                QSAT,         & ! air absolute saturation humidity (kg/m^3)
-                HQ,           & ! QATM/QSAT
-                CVAP,         & ! tritium concentration in vapor (pmol/m^3)
+                SURF_VAL,       & ! filtered surface tracer values
+                SCHMIDT,        & ! gas Schmidt number
+                GAS_SOL,        & ! gas solubility (mol/m^3/atm)
+                SURF_SAT,       & ! gas surface saturation
+                He_ALPHA_SOL,   & ! helium temperature-dependent solubility fractionation
+                KS,             & ! tranfer velocity for diffusive gas exchange (m/s)
+                KB,             & ! transfer velocity for large bubbles (m/s)
+                FLUX_DGE,       & ! flux due to difusive gas exchange
+                FLUX_CTB,       & ! flux due to completely trapped bubbles
+                FLUX_PTB,       & ! flux due to partially trapped bubbles
+                FLUX,           & ! total gas flux
+                FLUX_PREC,      & ! tritium flux due to precipitation (pmol/m^2/s)
+                FLUX_EVAP,      & ! tritium flux due to evaporation (pmol/m^2/s)
+                FLUX_EVAP_UP,   & ! upward tritium vapor flux (pmol/m^2/s)
+                FLUX_EVAP_DOWN, & ! downward tritium vapor flux (pmol/m^2/s)
+                U10,            & ! wind speed at 10 m (m/s)
+                USTAR,          & ! water friction velocity (m/s)
+                UA_STAR,        & ! atmospheric friction velocity (m/s)
+                CD,             & ! drag coefficient
+                RW,             & ! water-side resistance to tranfer
+                RA,             & ! air-side resistance to transfer
+                ALPHA,          & ! dimensionless diffusivity
+                DELTA_P,        & ! supersaturation due to partially dissolved bubbles
+                DELTA_EQ,       & ! equilibrium supersaturation
+                QATM,           & ! air absolute humidity (kg/m^3)
+                QSAT,           & ! air absolute saturation humidity (kg/m^3)
+                HQ,             & ! QATM/QSAT
+                CVAP,           & ! tritium concentration in vapor (pmol/m^3)
                 CPREC           ! tritium concentration in precipitation (pmol/m^3)
 
         character (char_len) :: &
@@ -1605,15 +1621,20 @@ contains
                 SURF_VAL = max(c0, p5*(SURF_VALS_OLD(:,:,tr_ind,iblock) + &
                         SURF_VALS_CUR(:,:,tr_ind,iblock))) ! pmol/m^3
                 ! NOTE: sign in FLUX_EVAP is opposite of Doney et al. 1993 because E = Vdown - Vup in CESM
-                FLUX_EVAP = EVAP_F(:,:,iblock) * (c1/(1.12_r8 * (c1 - HQ)) * SURF_VAL - HQ / (c1 - HQ) * CVAP) / rhofw
+                ! FLUX_EVAP = EVAP_F(:,:,iblock) * (c1/(1.12_r8 * (c1 - HQ)) * SURF_VAL - HQ / (c1 - HQ) * CVAP) / rhofw
+                FLUX_EVAP_UP   = EVAP_F(:,:,iblock) * c1 / (1.12_r8 * (c1 - HQ)) * SURF_VAL / rhofw  ! upward vapor flux
+                FLUX_EVAP_DOWN = -EVAP_F(:,:,iblock) * HQ / (c1 - HQ) * CVAP / rhofw                 ! downward vapor flux
+                FLUX_EVAP = FLUX_EVAP_UP + FLUX_EVAP_DOWN
                 FLUX_PREC = PREC_F(:,:,iblock) * CPREC / rhofw
-                FLUX      = FLUX_PREC ! + FLUX_EVAP ! pmol/m^2/s
+                FLUX      = FLUX_PREC + FLUX_EVAP ! pmol/m^2/s
                 STF_MODULE(:,:,tr_ind,iblock) = FLUX * cm_per_m ! pmol/m^2/s -> pmol/m^3 * cm/s
                 ! store tavg
-                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock) = FLUX_EVAP
-                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock) = FLUX_PREC
-                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock)      = FLUX
-                tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock)           = HQ
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_UP,iblock)   = FLUX_EVAP_UP
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_DOWN,iblock) = FLUX_EVAP_DOWN
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock)      = FLUX_EVAP
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock)      = FLUX_PREC
+                tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock)           = FLUX
+                tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock)                = HQ
             elsewhere
                 STF_MODULE(:,:,tr_ind,iblock) = c0
             endwhere
@@ -2398,6 +2419,10 @@ contains
                     tavg_Ar_GAS_FLUX_PTB,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock),           &
                     tavg_Tr_FLUX_EVAP,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_UP,iblock),        &
+                    tavg_Tr_FLUX_EVAP_UP,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_DOWN,iblock),      &
+                    tavg_Tr_FLUX_EVAP_DOWN,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock),           &
                     tavg_Tr_FLUX_PREC,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock),                &
