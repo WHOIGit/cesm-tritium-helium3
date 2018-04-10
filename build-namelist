@@ -13,8 +13,8 @@
 #
 # The simplest use of build-namelist is to execute it from the build directory where configure
 # was run.  By default it will use the config_cache.xml file that was written by configure to
-# determine the build time properties of the executable, and will write the files that contain 
-# the output namelists in that same directory.  
+# determine the build time properties of the executable, and will write the files that contain
+# the output namelists in that same directory.
 #
 #
 # Date        Contributor      Modification
@@ -36,14 +36,14 @@ SYNOPSIS
      build-namelist [options]
 OPTIONS
      -infile "filepath"    Specify a file containing namelists to read values from.
-     -namelist "namelist"  Specify namelist settings directly on the commandline by supplying 
+     -namelist "namelist"  Specify namelist settings directly on the commandline by supplying
                            a string containing FORTRAN namelist syntax, e.g.,
                               -namelist "&pop2_nml dt=1800 /"
      -help [or -h]         Print usage to STDOUT.
      -test                 Enable checking that input datasets exist on local filesystem.
      -verbose              Turn on verbose echoing of informational messages.
      -caseroot             CASEROOT directory variable
-     -casebuild            CASEBUILD directory variable          
+     -casebuild            CASEBUILD directory variable
      -scriptsroot          SCRIPTSROOT directory variable
      -ocn_grid             OCN_GRID variable
      -cfg_grid             Directory containing POP2 configuration scripts.
@@ -56,7 +56,7 @@ NOTE: The precedence for setting the values of namelist variables is (highest to
       1. namelist values set by specific command-line options, i.e. (none right now)
       2. values set on the command-line using the -namelist option,
       3. values read from the file specified by -infile,
-      4. values from the namelist defaults file - or values specifically set in build-namelist 
+      4. values from the namelist defaults file - or values specifically set in build-namelist
 EOF
 }
 
@@ -71,7 +71,7 @@ my $ProgDir = $1;                      # name of directory containing this scrip
                                        # the user's PATH
 my $cwd = getcwd();                    # current working directory
 my $cfgdir;                            # absolute pathname of directory that contains this script
-if ($ProgDir) { 
+if ($ProgDir) {
     $cfgdir = absolute_path($ProgDir);
 } else {
     $cfgdir = $cwd;
@@ -101,7 +101,7 @@ GetOptions(
     "caseroot=s"    => \$opts{'caseroot'},
     "casebuild=s"   => \$opts{'casebuild'},
     "scriptsroot=s" => \$opts{'scriptsroot'},
-    "inst_string=s" => \$opts{'inst_string'},	   
+    "inst_string=s" => \$opts{'inst_string'},
     "ocn_grid=s"    => \$opts{'ocn_grid'},
     "cfg_dir=s"     => \$opts{'cfg_dir'},
     "preview"       => \$opts{'preview'},
@@ -158,7 +158,7 @@ EOF
 # Make sure we can find required perl modules, definition, and defaults files.
 # Look for them under the directory that contains the configure script.
 
-# The root directory for the perl5 required utilities 
+# The root directory for the perl5 required utilities
 my $perl5lib_dir = "${SCRIPTSROOT}/ccsm_utils/Tools/perl5lib";
 
 # The XML::Lite module is required to parse the XML files.
@@ -193,7 +193,7 @@ EOF
 # The namelist definition file contains entries for all namelist variables that
 # can be output by build-namelist.  The version of the file that is associate with a
 # fixed POP2 tag is $cfgdir/namelist_files/namelist_definition.xml.  To aid developers
-# who make use of the SourceMods/src.pop2 directory - we allow the definition file 
+# who make use of the SourceMods/src.pop2 directory - we allow the definition file
 # to come from that directory
 my $nl_definition_file;
 if (-f "${CASEROOT}/SourceMods/src.pop2/namelist_definition_pop2.xml") {
@@ -231,7 +231,7 @@ require Build::NamelistDefaults;
 require Build::Namelist;
 
 #-----------------------------------------------------------------------------------------------
-# Create a configuration object from the POP2 config_cache.xml file-  created by 
+# Create a configuration object from the POP2 config_cache.xml file-  created by
 # pop2.cpl7.template in $CASEBUILD/pop2conf
 my $cfg = Build::Config->new('config_cache.xml');
 
@@ -383,33 +383,33 @@ if ($inst_string) {
     $output_r = "./${CASE}.pop${inst_string}.r";
     $output_h = "./${CASE}.pop${inst_string}.h";
     $output_d = "./${CASE}.pop${inst_string}.d";
-} 
+}
 
 # Environment variables set in pop2.buildnml.csh that are not xml variables
-my $RESTART_INPUT_TS_FMT = "$ENV{'RESTART_INPUT_TS_FMT'}"; 
+my $RESTART_INPUT_TS_FMT = "$ENV{'RESTART_INPUT_TS_FMT'}";
 my $LID = $ENV{'LID'};
 
-my $ntasks = $NTASKS_OCN / $NINST_OCN; 
+my $ntasks = $NTASKS_OCN / $NINST_OCN;
 
 if ($CONTINUE_RUN eq 'TRUE') {$RUN_TYPE = "continue";}
 
 my $iyear0  = `echo $RUN_STARTDATE | cut -c1-4  | sed -e 's/^0*//'`;
-$iyear0 =~ s/\n/ /g; # remove imbedded newline   
+$iyear0 =~ s/\n/ /g; # remove imbedded newline
 $iyear0 = $iyear0+0;
 
 my $imonth0 = `echo $RUN_STARTDATE | cut -c6-7  | sed -e 's/^0*//'`;
-$imonth0 =~ s/\n/ /g; # remove imbedded newline   
+$imonth0 =~ s/\n/ /g; # remove imbedded newline
 $imonth0 = $imonth0+0;
 
 my $iday0   = `echo $RUN_STARTDATE | cut -c9-10 | sed -e 's/^0*//'`;
-$iday0 =~ s/\n/ /g; # remove imbedded newline   
+$iday0 =~ s/\n/ /g; # remove imbedded newline
 $iday0 = $iday0+0;
 
 my $ihour0  = 0;
 my $iminute0 = 0;
 my $isecond0 = 0;
 
-# coupled_freq and coupled_freq_opts depend on 
+# coupled_freq and coupled_freq_opts depend on
 # environment variables NCPL_BASE_PERIOD and OCN_NCPL
 # Note that env_run.xml couples OCN_NCPL times per NCPL_BASE_PERIOD
 # while POP couples every coupled_freq [in units of coupled_freq_opts]
@@ -500,7 +500,7 @@ EOF
 if ($print>=2) { print "CESM inputdata root directory: $DIN_LOC_ROOT$eol"; }
 
 #-----------------------------------------------------------------------------------------------
-# Determine namelist 
+# Determine namelist
 #-----------------------------------------------------------------------------------------------
 
 ##################################
@@ -553,9 +553,9 @@ add_default($nl, 'fit_freq', 'val'=>"$OCN_NCPL");
 # namelist group: grid_nml #
 ####################################
 
-# Note: topography_opt = bathymetry is a nonstandard option that 
-# requires the user to provide nonstandard files in the users' 
-# $CASEROOT/SourceMods/src.pop2 directory 
+# Note: topography_opt = bathymetry is a nonstandard option that
+# requires the user to provide nonstandard files in the users'
+# $CASEROOT/SourceMods/src.pop2 directory
 # Currently this is hard-wired to 'file'
 
 my $topography_opt = 'file';               # hard-wired for now
@@ -565,11 +565,11 @@ add_default($nl, 'vert_grid_file'  , 'val'=>"${RUNDIR}/${OCN_GRID}_vert_grid");
 add_default($nl, 'region_info_file', 'val'=>"${RUNDIR}/${OCN_GRID}_region_ids");
 add_default($nl, 'topography_opt'  , 'val'=>"$topography_opt");
 add_default($nl, 'bathymetry_file' , 'val'=>"$bathymetry_file");
-add_default($nl, 'lremove_points'  , 'topograpahy_opt'=>"$topography_opt"); 
+add_default($nl, 'lremove_points'  , 'topograpahy_opt'=>"$topography_opt");
 add_default($nl, 'horiz_grid_opt');
 add_default($nl, 'horiz_grid_file');
 add_default($nl, 'vert_grid_opt' );
-add_default($nl, 'topography_file');   
+add_default($nl, 'topography_file');
 add_default($nl, 'topography_outfile', 'val'=>"${output_h}.topography_bathymetry.ieeer8");
 add_default($nl, 'kmt_kmin');
 add_default($nl, 'partial_bottom_cells');
@@ -592,9 +592,9 @@ if ($RUN_TYPE eq 'startup' && $topography_opt eq 'bathymetry') {
     add_default($nl, 'init_ts_file_fmt', 'val'=>'nc');
 } else {
     add_default($nl, 'init_ts_option'  , 'val'=>"ccsm_${RUN_TYPE}");
-    add_default($nl, 'init_ts_file');   
+    add_default($nl, 'init_ts_file');
     add_default($nl, 'init_ts_file_fmt', 'val'=>"$RESTART_INPUT_TS_FMT");
-}    
+}
 add_default($nl, 'init_ts_outfile'     , 'val'=>"${output_h}.ts_ic");
 add_default($nl, 'init_ts_outfile_fmt');
 add_default($nl, 'init_ts_suboption');
@@ -611,7 +611,7 @@ if ($INFO_DBUG > 1) {
 } else {
     add_default($nl, 'diag_global_freq_opt');
     add_default($nl, 'diag_cfl_freq_opt');
-    add_default($nl, 'diag_transp_freq_opt'); 
+    add_default($nl, 'diag_transp_freq_opt');
 }
 add_default($nl, 'diag_global_freq');
 add_default($nl, 'diag_cfl_freq');
@@ -656,7 +656,7 @@ add_default($nl, 'pressure_correction');
 ##########################################
 # namelist group: history_nml            #
 ##########################################
-    
+
 add_default($nl, 'history_contents', 'val'=>"${RUNDIR}/${OCN_GRID}_history_contents");
 add_default($nl, 'history_freq_opt');
 add_default($nl, 'history_freq');
@@ -666,7 +666,7 @@ add_default($nl, 'history_fmt');
 ##########################################
 # namelist group: movie_nml              #
 ##########################################
-    
+
 add_default($nl, 'movie_contents', 'val'=>"${RUNDIR}/${OCN_GRID}_movie_contents");
 add_default($nl, 'movie_freq_opt');
 add_default($nl, 'movie_freq');
@@ -683,7 +683,7 @@ add_default($nl, 'maxIterations');
 add_default($nl, 'convergenceCheckFreq');
 add_default($nl, 'preconditionerChoice');
 add_default($nl, 'preconditionerFile');
-    
+
 ##########################################
 # namelist group: vertical_mix_nml       #
 ##########################################
@@ -735,8 +735,8 @@ add_default($nl, 'tidal_energy_file_fmt');
 
 add_default($nl, 'rich_mix&vmix_kpp_nml');
 
-# grid dependent value of lhoriz_varying_background set in 
-# namelist_defaults_pop2.xml and value of ltidal-mixing is 
+# grid dependent value of lhoriz_varying_background set in
+# namelist_defaults_pop2.xml and value of ltidal-mixing is
 # obtained from default value already set
 
 my $ltidal_mixing = $nl->get_value('ltidal_mixing');
@@ -781,41 +781,41 @@ add_default($nl, 'lsubmesoscale_mixing');
 # namelist group: hmix_del2u_nml         #
 ##########################################
 
-add_default($nl, 'lauto_hmix&hmix_del2u_nml'); 
+add_default($nl, 'lauto_hmix&hmix_del2u_nml');
 
-add_default($nl, 'lvariable_hmix&hmix_del2u_nml'); 
+add_default($nl, 'lvariable_hmix&hmix_del2u_nml');
 
-add_default($nl, 'am&hmix_del2u_nml'); 
+add_default($nl, 'am&hmix_del2u_nml');
 
 ##########################################
 # namelist group: hmix_del2t_nml         #
 ##########################################
 
-add_default($nl, 'lauto_hmix&hmix_del2t_nml'); 
+add_default($nl, 'lauto_hmix&hmix_del2t_nml');
 
-add_default($nl, 'lvariable_hmix&hmix_del2t_nml'); 
+add_default($nl, 'lvariable_hmix&hmix_del2t_nml');
 
-add_default($nl, 'ah&hmix_del2t_nml'); 
+add_default($nl, 'ah&hmix_del2t_nml');
 
 ##########################################
 # namelist group: hmix_del4u_nml         #
 ##########################################
 
-add_default($nl, 'lauto_hmix&hmix_del4u_nml'); 
+add_default($nl, 'lauto_hmix&hmix_del4u_nml');
 
-add_default($nl, 'lvariable_hmix&hmix_del4u_nml'); 
+add_default($nl, 'lvariable_hmix&hmix_del4u_nml');
 
-add_default($nl, 'am&hmix_del4u_nml'); 
+add_default($nl, 'am&hmix_del4u_nml');
 
 ##########################################
 # namelist group: hmix_del4t_nml         #
 ##########################################
 
-add_default($nl, 'lauto_hmix&hmix_del4t_nml'); 
+add_default($nl, 'lauto_hmix&hmix_del4t_nml');
 
-add_default($nl, 'lvariable_hmix&hmix_del4t_nml'); 
+add_default($nl, 'lvariable_hmix&hmix_del4t_nml');
 
-add_default($nl, 'ah&hmix_del4t_nml'); 
+add_default($nl, 'ah&hmix_del4t_nml');
 
 ##########################################
 # namelist group: hmix_gm_nml            #
@@ -825,15 +825,15 @@ add_default($nl, 'kappa_isop_choice');
 add_default($nl, 'kappa_thic_choice');
 
 # All namelist values are stored in exactly the format
-# that is required in a valid namelist.  So if that value 
-# is a string, then the quotes are stored as part of the value. 
+# that is required in a valid namelist.  So if that value
+# is a string, then the quotes are stored as part of the value.
 
 my $kappa_isop_choice = $nl->get_value('kappa_isop_choice');
 my $kappa_thic_choice = $nl->get_value('kappa_thic_choice');
 $kappa_isop_choice =~ s/[\'\"]//g;
 $kappa_thic_choice =~ s/[\'\"]//g;
 
-# note that ah_gm_value is explicitly put below since ah is 
+# note that ah_gm_value is explicitly put below since ah is
 # contained in several namelist variables
 
 add_default($nl, 'ah_bolus'    ,
@@ -849,7 +849,7 @@ add_default($nl, 'ah&hmix_gm_nml',
                  'kappa_isop_choice'=>"$kappa_isop_choice",
                  'kappa_thic_choice'=>"$kappa_thic_choice");
 
-# note that ocn_grid dependence for ah_bolus, ah_bkg_srfbl 
+# note that ocn_grid dependence for ah_bolus, ah_bkg_srfbl
 # is obtained from config_cache.xml
 
 add_default($nl, 'buoyancy_freq_filename', 'val'=>"${RUNDIR}/buoyancy_freq");
@@ -935,8 +935,8 @@ add_default($nl,'kmxice');
 # namelist group: pressure_grad_nml      #
 ##########################################
 
-add_default($nl,'lpressure_avg'); 
-add_default($nl,'lbouss_correct'); 
+add_default($nl,'lpressure_avg');
+add_default($nl,'lbouss_correct');
 
 ##########################################
 # namelist group: topostress_nml         #
@@ -1182,6 +1182,8 @@ if ($OCN_TRACER_MODULES =~ /tr3he/) {
     add_default($nl, 'model_year');
     add_default($nl, 'data_year' );
     add_default($nl, 'tr3he_formulation');
+    add_default($nl, 'lflux_tritium');
+    add_default($nl, 'tritium_dep_file');
 }
 
 
@@ -1229,7 +1231,7 @@ if ($OCN_TRACER_MODULES =~ /cfc/) {
             # Check to see if init_cfc_option was set in user_nl_pop2
             $init_cfc_option = $nl->get_variable_value("cfc_nml", "init_cfc_option");
             if ($init_cfc_option eq "") {
-              # If not, error out with message saying value must be specified 
+              # If not, error out with message saying value must be specified
               print "ERROR: CFCs cannot be automatically initializd post 1930 in a startup run! Set init_cfc_option in user_nl_pop2 before building pop2_in.\n";
               die;
             }
@@ -1432,10 +1434,10 @@ if ($OCN_TRACER_MODULES =~ /ecosys/) {
 ##########################################
 
 if ($OCN_TRACER_MODULES =~ /moby/) {
-    
+
     my $temp;
 
-    add_default($nl, 'moby_log_filename', 'val'=>"${RUNDIR}/moby${inst_string}.log.$LID"); 
+    add_default($nl, 'moby_log_filename', 'val'=>"${RUNDIR}/moby${inst_string}.log.$LID");
     add_default($nl, "lmoby");
     add_default($nl, "ldarwin");
     add_default($nl, 'init_moby_option', 'val'=>"ccsm_${RUN_TYPE}");
@@ -1453,7 +1455,7 @@ if ($OCN_TRACER_MODULES =~ /moby/) {
     add_default($nl, 'moby_iron_flux_input%file_fmt');
     add_default($nl, 'moby_iron_flux_input%file_varname');
     add_default($nl, 'moby_iron_flux_input%scale_factor');
-    
+
     add_default($nl, 'moby_lecovars_full_depth_tavg');
     my $lflux_gas_co2;
     if ($CCSM_BGC eq "CO2C") {
@@ -1486,12 +1488,12 @@ if ($OCN_TRACER_MODULES =~ /moby/) {
     my $fh_in  = new IO::File;
     my $fh_out = new IO::File;
     $fh_out->open(">${RUNDIR}/moby_in") or die "** can't open file: ${RUNDIR}/moby_in\n";
-    foreach my $file ( "${OCN_GRID}_data", 
+    foreach my $file ( "${OCN_GRID}_data",
                        "${OCN_GRID}_data.ptracers",
                        "${OCN_GRID}_data.gchem" ,
                        "${OCN_GRID}_data.$OCN_TRACER_MODULES_OPT" ,
-                       "${OCN_GRID}_data.misc", 
-                       "${OCN_GRID}_data.pkg" ) 
+                       "${OCN_GRID}_data.misc",
+                       "${OCN_GRID}_data.pkg" )
     {
   my $datafile;
   if (-e "$CASEROOT/SourceMods/src.pop2/src.moby/$file") {
@@ -1546,7 +1548,7 @@ my %tavg_nml = (tavg_freq_opt           => [],
 
 if ($OCN_GRID =~ /^gx*/) {
     $ltavg_streams_index_present  = ".true.";
-    $ltavg_nino_diags_requested   = ".true."; 
+    $ltavg_nino_diags_requested   = ".true.";
 } elsif ($OCN_GRID =~ /^tx*/) {
     $ltavg_streams_index_present  = ".true.";
     $ltavg_nino_diags_requested   = ".false.";
@@ -1591,7 +1593,7 @@ my $file;
 # 1. base tavg contents
 #-------------------------
 
-# 1.a. create $CASEBUILD/pop2conf/base.tavg.nml file 
+# 1.a. create $CASEBUILD/pop2conf/base.tavg.nml file
 $sysmod;
 $file = "ocn.base.tavg.csh";
 if (-f "${my_path}/$file"){
@@ -1623,7 +1625,7 @@ while ($line = <$fh_in> )  {
 $fh_in->close();
 
 # 1.d create base tavg contents file - in pop2conf/
-#     either from $my_path (first) or from 
+#     either from $my_path (first) or from
 my $base_tavg_file  = "${CASEBUILD}/pop2conf/${OCN_GRID}_tavg_contents";
 if ($OCN_TAVG_HIFREQ eq "TRUE") {
     # High-frequency tavg contents
@@ -1668,7 +1670,7 @@ if ($lniw_mixing =~ /true/) {
 my $budget_tavg_file = "${CASEBUILD}/pop2conf/budget_tavg_contents";
 $file = "tavg_contents_tracer_budget_terms";
 if ($OCN_TAVG_TRACER_BUDGET eq "TRUE") {
-  # tracer budget tavg contents 
+  # tracer budget tavg contents
   if (-f "${my_path}/$file") {
     $sysmod = "cp -fp ${my_path}/$file $budget_tavg_file";
     system($sysmod) == 0 or die "ERROR: $sysmod failed: $?\n";
@@ -1681,7 +1683,7 @@ if ($OCN_TAVG_TRACER_BUDGET eq "TRUE") {
 }
 
 #-------------------------
-# 3. tracer tavg contents 
+# 3. tracer tavg contents
 #-------------------------
 my @modules = split( ' ', $OCN_TRACER_MODULES);
 for my $module (@modules) {
@@ -1795,19 +1797,19 @@ my @groups = qw(domain_nml
 
 if ($OCN_TRACER_MODULES =~ /iage/) {
     push @groups, qw(iage_nml);
-}    
+}
 if ($OCN_TRACER_MODULES =~ /cfc/) {
     push @groups, qw(cfc_nml);
-}    
+}
 if ($OCN_TRACER_MODULES =~ /ecosys/) {
     push @groups, qw(ecosys_nml ecosys_parms_nml);
-}    
+}
 if ($OCN_TRACER_MODULES =~ /moby/) {
     push @groups, qw(moby_nml moby_parms_nml );
 }
 if ($OCN_TRACER_MODULES =~ /tr3he/) {
     push @groups, qw(tr3he_nml);
-}    
+}
 
 # Check for variables in the "derived" group, add them to appropriate group
 for my $var ($nl->get_variable_names('derived')) {
@@ -1913,7 +1915,7 @@ sub add_default {
     # The default values for input pathnames are relative.  If the namelist
     # variable is defined to be an absolute pathname, then prepend
     # the CCSM inputdata root directory.
-    # TODO: unless ignore_abs is passed as argument 
+    # TODO: unless ignore_abs is passed as argument
     if ($is_input_pathname eq 'abs') {
       unless ($opts{'noprepend'}){
         $val = set_abs_filepath($val, $DIN_LOC_ROOT);
@@ -1989,31 +1991,31 @@ sub check_input_files {
       $pathname =~ s/['"]//g;
 
       # bottom_cell_file could be 'unknown_bottom_cell'
-      if (($var eq 'bottom_cell_file') and 
+      if (($var eq 'bottom_cell_file') and
           ($pathname eq 'unknown_bottom_cell')) {
         $is_a_file = 0;
       }
 
       # tidal_energy_file could be 'unknown_tidal_mixing'
-      if (($var eq 'tidal_energy_file') and 
+      if (($var eq 'tidal_energy_file') and
           ($pathname eq 'unknown_tidal_mixing')) {
         $is_a_file = 0;
       }
 
       # niw_energy_file could be 'unknown_niw_energy'
-      if (($var eq 'niw_energy_file') and 
+      if (($var eq 'niw_energy_file') and
           ($pathname eq 'unknown_niw_energy')) {
         $is_a_file = 0;
       }
 
       # init_iage_file could be 'same_as_TS'
-      if (($var eq 'init_iage_init_file') and 
+      if (($var eq 'init_iage_init_file') and
           ($pathname eq 'same_as_TS')) {
         $is_a_file = 0;
       }
 
       # init_ecosys_init_file could be 'same_as_TS'
-      if (($var eq 'init_ecosys_init_file') and 
+      if (($var eq 'init_ecosys_init_file') and
           ($pathname eq 'same_as_TS')) {
         $is_a_file = 0;
       }
@@ -2205,8 +2207,8 @@ sub expand_env_xml {
 	my $subst = $xmlvars{$1};
 	$value =~ s/\$${1}/$subst/g;
     }
-    return $value; 
-}	 
+    return $value;
+}
 
 #-------------------------------------------------------------------------------
 
@@ -2235,7 +2237,7 @@ sub print_nl_to_screen {
 sub valid_date {
 # return 1 if given date ($$month/$$day/$$year) exists in calendar $cal
 # otherwise subtract number of days in $$month from $$day, and increment
-# $$month by 1 (also incrementing $$year if going from Dec to Jan) and 
+# $$month by 1 (also incrementing $$year if going from Dec to Jan) and
 # then return 0.
 
   use feature "switch";
@@ -2293,5 +2295,3 @@ sub leap() {
   }
   return 0;
 }
-
-

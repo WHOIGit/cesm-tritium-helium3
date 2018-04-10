@@ -761,22 +761,24 @@
 <niw_energy_file_fmt>'bin'</niw_energy_file_fmt>
 
 <!---------------------------->
-<!--        tr3he_nml         -->
+<!--        tr3he_nml       -->
 <!---------------------------->
 
-<tr3he_formulation>model</tr3he_formulation>
-
-<data_year>1963</data_year>
-
-<init_tr3he_option>saturation</init_tr3he_option>
+<init_tr3he_option>file</init_tr3he_option>
 
 <init_tr3he_init_file>ocn/pop/gx1v6/ic/tritium_3He_init_Liang.nc</init_tr3he_init_file>
 
-<model_year>1</model_year>
-
 <init_tr3he_init_file_fmt>nc</init_tr3he_init_file_fmt>
 
-<!--tr3he_file>ocn/pop/res_indpt/forcing/UNDEFINED</tr3he_file>
+<tr3he_formulation>model</tr3he_formulation>
+
+<data_year>1950</data_year>
+
+<model_year>127</model_year>
+
+<lflux_tritium>.false.</lflux_tritium>
+
+<tritium_dep_file>ocn/pop/res_indpt/forcing/tritium_dep_gnip.txt</tritium_dep_file>
 
 <!---------------------------->
 <!--        cfc_nml         -->

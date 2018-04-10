@@ -6035,14 +6035,14 @@ Default:
 </entry>
 
 <entry
-id="tritium_file"
+id="tritium_dep_file"
 type="char*256"
 category="passive_tracers"
 group="tr3he_nml"
 input_pathname="abs" >
 File name for atm tritium.
 
-Default: 'Not defined yet'
+Default: 'tritium_dep_gnip.txt '
 </entry>
 
 <entry
@@ -6075,6 +6075,14 @@ Flux formulation.
 
 Valid Values: 'model', 'file'
 Default: 'model'
+</entry>
+
+<entry
+id="lflux_tritium"
+type="logical"
+category="passive_tracers"
+group="tr3he_nml" >
+Default: .true.
 </entry>
 
 <entry
