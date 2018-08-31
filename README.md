@@ -1,4 +1,4 @@
-# tr3he
+# cesm-tritium-helium3
 
 ## Tritium-helium3 module for CESM 1.2.2
 
