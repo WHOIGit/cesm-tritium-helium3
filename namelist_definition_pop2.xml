@@ -6046,7 +6046,7 @@ Default: 'tritium_dep_gnip.txt '
 </entry>
 
 <entry
-id="model_year"
+id="tr_model_year"
 type="integer"
 category="passive_tracers"
 group="tr3he_nml" >
@@ -6056,7 +6056,7 @@ Default: Not defined yet
 </entry>
 
 <entry
-id="data_year"
+id="tr_data_year"
 type="integer"
 category="passive_tracers"
 group="tr3he_nml" >
@@ -6083,6 +6083,14 @@ type="logical"
 category="passive_tracers"
 group="tr3he_nml" >
 Default: .true.
+</entry>
+
+<entry
+id="lflux_bomb"
+type="logical"
+category="passive_tracers"
+group="tr3he_nml" >
+Default: .false.
 </entry>
 
 <entry

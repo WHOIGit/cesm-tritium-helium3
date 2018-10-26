@@ -26,7 +26,7 @@ use Cwd;
 use English;
 use Getopt::Long;
 use IO::File;
-no warnings 'experimental';
+#no warnings 'experimental';
 
 #-----------------------------------------------------------------------------------------------
 
@@ -1179,10 +1179,11 @@ if ($OCN_TRACER_MODULES =~ /tr3he/) {
     }
     add_default($nl, 'init_tr3he_init_file_fmt');
 
-    add_default($nl, 'model_year');
-    add_default($nl, 'data_year' );
+    add_default($nl, 'tr_model_year');
+    add_default($nl, 'tr_data_year' );
     add_default($nl, 'tr3he_formulation');
     add_default($nl, 'lflux_tritium');
+    add_default($nl, 'lflux_bomb');    
     add_default($nl, 'tritium_dep_file');
 }
 

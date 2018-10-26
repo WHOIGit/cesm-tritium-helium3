@@ -772,11 +772,13 @@
 
 <tr3he_formulation>model</tr3he_formulation>
 
-<data_year>1950</data_year>
+<tr_data_year>1950</tr_data_year>
 
-<model_year>127</model_year>
+<tr_model_year>127</tr_model_year>
 
-<lflux_tritium>.false.</lflux_tritium>
+<lflux_tritium>.true.</lflux_tritium>
+
+<lflux_bomb>.false.</lflux_bomb>
 
 <tritium_dep_file>ocn/pop/res_indpt/forcing/tritium_dep_gnip.txt</tritium_dep_file>
 
@@ -786,12 +788,12 @@
 
 <cfc_formulation>model</cfc_formulation>
 
-<data_year>1981</data_year>
+<data_year>1931</data_year>
 <data_year ocn_transient="1850-2000">1850</data_year>
 
 <init_cfc_init_file>same_as_TS</init_cfc_init_file>
 
-<model_year>1</model_year>
+<model_year>108</model_year>
 <model_year ocn_transient="1850-2000">1850</model_year>
 
 <pcfc_file>ocn/pop/res_indpt/forcing/pcfc1112_atm_20130410.nc</pcfc_file>

@@ -8,7 +8,7 @@ module tr3he_mod
     !  Module for tritium (3H) and helium 3 (3He)
     !
     !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-    !  Last modified on Tue, 25 Jul 2017 10:09:35 -0400
+    !  Last modified on Fri Sep 21 2018 11:27:09 -0400 
     !
     ! !DESCRIPTION:
     !
@@ -69,7 +69,8 @@ module tr3he_mod
 
     logical (log_kind) :: &
             lflux_gas_3he, &      ! gas flux for helium 3
-            lflux_tritium         ! atmospheric tritium flux
+            lflux_tritium, &      ! atmospheric tritium flux
+            lflux_bomb         ! pre-bomb atmospheric tritium flux
 
     !-----------------------------------------------------------------------
     !  relative tracer indices
@@ -125,10 +126,10 @@ module tr3he_mod
             tr3he_formulation, & ! how to calculate flux (file or model)
             tritium_dep_file     ! filename for atm tritium
 
-    integer (int_kind) :: &
-            model_year,   & ! arbitrary model year
-            data_year,    & ! year in data that corresponds to model_year
-            gnip_data_len   ! length of atmospheric tritium precipitation record
+    integer (int_kind) ::  &
+            tr_model_year, & ! arbitrary model year
+            tr_data_year,  & ! year in data that corresponds to model_year
+            gnip_data_len    ! length of atmospheric tritium precipitation record
 
     integer, parameter :: & ! dimensions of GNIP tritium concentration data
             gnplat  = 17,   &
@@ -312,9 +313,9 @@ contains
 
         namelist /tr3he_nml/                                                       &
                 init_tr3he_option, init_tr3he_init_file, init_tr3he_init_file_fmt, &
-                tracer_init_ext, tritium_dep_file, model_year, data_year,          &
+                tracer_init_ext, tritium_dep_file, tr_model_year, tr_data_year,    &
                 tr3he_formulation, gas_flux_fice, gas_flux_ws, gas_flux_ap,        &
-                lflux_tritium
+                lflux_tritium, lflux_bomb
 
         character (char_len) ::  &
                 tr3he_restart_filename      ! modified file name for restart file
@@ -387,10 +388,11 @@ contains
         end do
 
         tritium_dep_file  = 'unknown'
-        model_year        = 1
-        data_year         = 1950
+        tr_model_year     = 1
+        tr_data_year      = 1950
         tr3he_formulation = 'model'
         lflux_tritium     = .true.
+        lflux_bomb        = .false.
 
         gas_flux_fice%filename     = 'unknown'
         gas_flux_fice%file_varname = 'FICE'
@@ -461,10 +463,11 @@ contains
         end do
 
         call broadcast_scalar(tritium_dep_file, master_task)
-        call broadcast_scalar(model_year, master_task)
-        call broadcast_scalar(data_year, master_task)
+        call broadcast_scalar(tr_model_year, master_task)
+        call broadcast_scalar(tr_data_year, master_task)
         call broadcast_scalar(tr3he_formulation, master_task)
         call broadcast_scalar(lflux_tritium, master_task)
+        call broadcast_scalar(lflux_bomb, master_task)        
 
         call broadcast_scalar(gas_flux_fice%filename, master_task)
         call broadcast_scalar(gas_flux_fice%file_varname, master_task)
@@ -1266,7 +1269,8 @@ contains
                 A          = 1.3_r8,              &
                 phi        = 1.0_r8,              &
                 ha         = 0.13_r8,             &
-                hw         = 13.3_r8 / (A * phi)
+                hw         = 13.3_r8 / (A * phi), &
+                hqmax      = 0.95_r8                ! max relative humidity
 
         !-----------------------------------------------------------------------
 
@@ -1672,7 +1676,7 @@ contains
             if (lflux_tritium) then
                 QATM  = max(c0, SHUM(:,:,iblock)/rho_air) ! SHUM has small negative values
                 QSAT  = 0.98_r8 * 640380._r8 / exp(5107.4_r8/(SST(:,:,iblock)+T0_kelvin))
-                HQ    = QATM/QSAT
+                HQ    = min(hqmax, QATM/QSAT)
                 call comp_tritium_dep(iblock, LAND_MASK(:,:,iblock), data_ind(iblock), CPREC)
                 CPREC = 0.10995_r8 * CPREC  ! TU -> pmol/m^3
                 CVAP  = CPREC * 0.70_r8     ! pmol/m^3 (Cv = 0.7 * Cp)
@@ -2629,7 +2633,7 @@ contains
         !-----------------------------------------------------------------------
 
         mapped_date = iyear + (iday_of_year-1+frac_day)/days_in_year &
-                - model_year + data_year
+                - tr_model_year + tr_data_year
 
         ! if (mapped_date >= gnip_date(gnip_data_len) + max_gnip_extension) &
         !         print *, 'exit_POP(sigAbort, model date maps too far beyond pcfc_date(end))'
@@ -2641,7 +2645,7 @@ contains
         if (mapped_date < gnip_date(1)) then
             gnip_tritium_curr = gnip_tritium(:,1)
             data_ind = 1
-            return
+            ! return
         endif
 
         !-----------------------------------------------------------------------
@@ -2668,15 +2672,17 @@ contains
         !-----------------------------------------------------------------------
         !  Generate tritium concentrations for current time step.
         !-----------------------------------------------------------------------
+        
+        if (lflux_bomb) then
+            if (data_ind < gnip_data_len) then
+                weight = (mapped_date - gnip_date(data_ind)) &
+                        / (gnip_date(data_ind+1) - gnip_date(data_ind))
 
-        if (data_ind < gnip_data_len) then
-            weight = (mapped_date - gnip_date(data_ind)) &
-                    / (gnip_date(data_ind+1) - gnip_date(data_ind))
-
-            gnip_tritium_curr = &
-                    weight * gnip_tritium(:,data_ind+1) + (c1-weight) * gnip_tritium(:,data_ind)
-        else
-            gnip_tritium_curr = gnip_tritium(:,gnip_data_len)
+                gnip_tritium_curr = &
+                        weight * gnip_tritium(:,data_ind+1) + (c1-weight) * gnip_tritium(:,data_ind)
+            else
+                gnip_tritium_curr = gnip_tritium(:,gnip_data_len)
+            endif
         endif
 
         do i=1, gnplat
