@@ -780,7 +780,9 @@
 
 <lflux_bomb>.false.</lflux_bomb>
 
-<tritium_dep_file>ocn/pop/res_indpt/forcing/tritium_dep_gnip.txt</tritium_dep_file>
+<tritium_dep_file_ocn>ocn/pop/res_indpt/forcing/tritium_dep_gnip.txt</tritium_dep_file_ocn>
+
+<tritium_dep_file_lnd>ocn/pop/res_indpt/forcing/tritium_dep_gnip_lnd.txt</tritium_dep_file_lnd>
 
 <!---------------------------->
 <!--        cfc_nml         -->

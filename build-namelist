@@ -1184,7 +1184,8 @@ if ($OCN_TRACER_MODULES =~ /tr3he/) {
     add_default($nl, 'tr3he_formulation');
     add_default($nl, 'lflux_tritium');
     add_default($nl, 'lflux_bomb');    
-    add_default($nl, 'tritium_dep_file');
+    add_default($nl, 'tritium_dep_file_ocn');
+    add_default($nl, 'tritium_dep_file_lnd');    
 }
 
 

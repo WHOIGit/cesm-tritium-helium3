@@ -6035,14 +6035,25 @@ Default:
 </entry>
 
 <entry
-id="tritium_dep_file"
+id="tritium_dep_file_ocn"
 type="char*256"
 category="passive_tracers"
 group="tr3he_nml"
 input_pathname="abs" >
-File name for atm tritium.
+File name for atm tritium over ocean.
 
 Default: 'tritium_dep_gnip.txt '
+</entry>
+
+<entry
+id="tritium_dep_file_lnd"
+type="char*256"
+category="passive_tracers"
+group="tr3he_nml"
+input_pathname="abs" >
+File name for atm tritium over land.
+
+Default: 'tritium_dep_gnip_lnd.txt '
 </entry>
 
 <entry

@@ -8,7 +8,7 @@ module tr3he_mod
     !  Module for tritium (3H) and helium 3 (3He)
     !
     !  Created by Ivan Lima <ivan@whoi.edu> on Tue Nov 24 2015 10:39:33 -0500
-    !  Last modified on Fri Sep 21 2018 11:27:09 -0400 
+    !  Last modified on Tue Nov 27 2018 11:23:22 -0500
     !
     ! !DESCRIPTION:
     !
@@ -67,10 +67,10 @@ module tr3he_mod
     !  flags controlling which portion of code are executed
     !-----------------------------------------------------------------------
 
-    logical (log_kind) :: &
+    logical (log_kind) ::  &
             lflux_gas_3he, &      ! gas flux for helium 3
             lflux_tritium, &      ! atmospheric tritium flux
-            lflux_bomb         ! pre-bomb atmospheric tritium flux
+            lflux_bomb            ! pre-bomb atmospheric tritium flux
 
     !-----------------------------------------------------------------------
     !  relative tracer indices
@@ -122,22 +122,26 @@ module tr3he_mod
     !  forcing related variables
     !-----------------------------------------------------------------------
 
-    character(char_len) ::     &
-            tr3he_formulation, & ! how to calculate flux (file or model)
-            tritium_dep_file     ! filename for atm tritium
+    character(char_len) ::        &
+            tr3he_formulation,    & ! how to calculate flux (file or model)
+            tritium_dep_file_ocn, & ! filename for atm tritium over ocean
+            tritium_dep_file_lnd    ! filename for atm tritium over land
 
     integer (int_kind) ::  &
             tr_model_year, & ! arbitrary model year
             tr_data_year,  & ! year in data that corresponds to model_year
             gnip_data_len    ! length of atmospheric tritium precipitation record
 
-    integer, parameter :: & ! dimensions of GNIP tritium concentration data
-            gnplat  = 17,   &
-            gnptime = 733
+    integer, parameter ::     & ! dimensions of GNIP tritium concentration data
+            gnplat_ocn  = 17, &
+            gnplat_lnd  = 9,  &
+            gnptime     = 733
 
-    real (r8), dimension(gnplat)         :: gnip_lat     ! lower bound of latitude bins
-    real (r8), dimension(gnptime)        :: gnip_date    ! date/time in decimal years
-    real (r8), dimension(gnplat,gnptime) :: gnip_tritium ! tritium concentration in precipitation (TU)
+    real (r8), dimension(gnplat_ocn)         :: gnip_lat_ocn     ! lower bound of latitude bins (ocean)
+    real (r8), dimension(gnplat_lnd)         :: gnip_lat_lnd     ! lower bound of latitude bins (land)
+    real (r8), dimension(gnptime)            :: gnip_date        ! date/time in decimal years
+    real (r8), dimension(gnplat_ocn,gnptime) :: gnip_tritium_ocn ! tritium concentration in precipitation over ocean (TU)
+    real (r8), dimension(gnplat_lnd,gnptime) :: gnip_tritium_lnd ! tritium concentration in precipitation over land (TU)
 
     real (r8), dimension(:,:,:,:), allocatable :: &
             INTERP_WORK            ! temp array for interpolate_forcing output
@@ -202,8 +206,10 @@ module tr3he_mod
             tavg_Tr_FLUX_EVAP_UP,         bufind_Tr_FLUX_EVAP_UP,        & ! tavg id for tritium upward flux due to evaporation
             tavg_Tr_FLUX_EVAP_DOWN,       bufind_Tr_FLUX_EVAP_DOWN,      & ! tavg id for tritium downward flux due to evaporation
             tavg_Tr_FLUX_PREC,            bufind_Tr_FLUX_PREC,           & ! tavg id for tritium flux due to precipitation
+            tavg_Tr_FLUX_ROFF,            bufind_Tr_FLUX_ROFF,           & ! tavg id for tritium flux due to river runoff
             tavg_Tr_FLUX,                 bufind_Tr_FLUX,                & ! tavg id for total tritium surface flux
             tavg_Tr_PREC,                 bufind_Tr_PREC,                & ! tavg id for tritium concentration in precipitation
+            tavg_Tr_RIVER,                bufind_Tr_RIVER,               & ! tavg id for tritium concentration in rivers
             tavg_HQ,                      bufind_HQ                        ! tavg id for ratio of abs humidities (QATM/QSAT)
 
     !-----------------------------------------------------------------------
@@ -313,9 +319,9 @@ contains
 
         namelist /tr3he_nml/                                                       &
                 init_tr3he_option, init_tr3he_init_file, init_tr3he_init_file_fmt, &
-                tracer_init_ext, tritium_dep_file, tr_model_year, tr_data_year,    &
-                tr3he_formulation, gas_flux_fice, gas_flux_ws, gas_flux_ap,        &
-                lflux_tritium, lflux_bomb
+                tracer_init_ext, tritium_dep_file_ocn, tritium_dep_file_lnd,       &
+                tr_model_year, tr_data_year, tr3he_formulation, gas_flux_fice,     &
+                gas_flux_ws, gas_flux_ap, lflux_tritium, lflux_bomb
 
         character (char_len) ::  &
                 tr3he_restart_filename      ! modified file name for restart file
@@ -387,7 +393,8 @@ contains
             tracer_init_ext(n)%file_fmt     = 'bin'
         end do
 
-        tritium_dep_file  = 'unknown'
+        tritium_dep_file_ocn  = 'unknown'
+        tritium_dep_file_lnd  = 'unknown'
         tr_model_year     = 1
         tr_data_year      = 1950
         tr3he_formulation = 'model'
@@ -462,12 +469,13 @@ contains
             call broadcast_scalar(tracer_init_ext(n)%file_fmt, master_task)
         end do
 
-        call broadcast_scalar(tritium_dep_file, master_task)
+        call broadcast_scalar(tritium_dep_file_ocn, master_task)
+        call broadcast_scalar(tritium_dep_file_lnd, master_task)
         call broadcast_scalar(tr_model_year, master_task)
         call broadcast_scalar(tr_data_year, master_task)
         call broadcast_scalar(tr3he_formulation, master_task)
         call broadcast_scalar(lflux_tritium, master_task)
-        call broadcast_scalar(lflux_bomb, master_task)        
+        call broadcast_scalar(lflux_bomb, master_task)
 
         call broadcast_scalar(gas_flux_fice%filename, master_task)
         call broadcast_scalar(gas_flux_fice%file_varname, master_task)
@@ -950,6 +958,12 @@ contains
         var_cnt = var_cnt+1
         bufind_Tr_FLUX_PREC = var_cnt
 
+        call define_tavg_field(tavg_Tr_FLUX_ROFF,'STF_TRITIUM_ROFF',2, &
+                long_name='3H surface flux due to river runoff',      &
+                units='pmol/m^2/s', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_FLUX_ROFF = var_cnt
+
         call define_tavg_field(tavg_Tr_FLUX,'STF_TRITIUM',2, &
                 long_name='3H total surface flux',           &
                 units='pmol/m^2/s', grid_loc='2110')
@@ -961,6 +975,12 @@ contains
                 units='pmol/m^3', grid_loc='2110')
         var_cnt = var_cnt+1
         bufind_Tr_PREC = var_cnt
+
+        call define_tavg_field(tavg_Tr_RIVER,'TRITIUM_RIVER',2,  &
+                long_name='3H concentration in rivers', &
+                units='pmol/m^3', grid_loc='2110')
+        var_cnt = var_cnt+1
+        bufind_Tr_RIVER = var_cnt
 
         call define_tavg_field(tavg_HQ,'HQ',2, &
                 long_name='QSATM/QSAT',        &
@@ -1146,7 +1166,7 @@ contains
     ! !IROUTINE: tr3he_set_sflux
     ! !INTERFACE:
 
-    subroutine tr3he_set_sflux(SHUM,EVAP_F,PREC_F,U10_SQR,IFRAC,PRESS,SST,SSS,RHO, &
+    subroutine tr3he_set_sflux(SHUM,EVAP_F,PREC_F,ROFF_F,U10_SQR,IFRAC,PRESS,SST,SSS,RHO, &
             SURF_VALS_OLD,SURF_VALS_CUR,STF_MODULE)
 
         ! !DESCRIPTION:
@@ -1180,6 +1200,7 @@ contains
                 RHO,     & ! sea surface density (kg/m^3)
                 EVAP_F,  & ! evaporation flux (kg/m2/s)
                 PREC_F,  & ! precipitation flux (kg/m2/s)
+                ROFF_F,  & ! river runoff flux (kg/m2/s)
                 SHUM       ! air specific humidity (kg/kg)
 
         real (r8), dimension(nx_block,ny_block,tr3he_tracer_cnt,max_blocks_clinic), &
@@ -1218,6 +1239,7 @@ contains
                 FLUX_CTB,       & ! flux due to completely trapped bubbles
                 FLUX_PTB,       & ! flux due to partially trapped bubbles
                 FLUX,           & ! total gas flux
+                FLUX_ROFF,      & ! tritium flux due to river runoff (pmol/m^2/s)
                 FLUX_PREC,      & ! tritium flux due to precipitation (pmol/m^2/s)
                 FLUX_EVAP,      & ! tritium flux due to evaporation (pmol/m^2/s)
                 FLUX_EVAP_UP,   & ! upward tritium vapor flux (pmol/m^2/s)
@@ -1235,7 +1257,8 @@ contains
                 QSAT,           & ! air absolute saturation humidity (kg/m^3)
                 HQ,             & ! QATM/QSAT
                 CVAP,           & ! tritium concentration in vapor (pmol/m^3)
-                CPREC             ! tritium concentration in precipitation (pmol/m^3)
+                CPREC,          & ! tritium concentration in precipitation over ocean (pmol/m^3)
+                CRIVER            ! tritium concentration in rivers (pmol/m^3)
 
         character (char_len) :: &
                 tracer_data_label          ! label for what is being updated
@@ -1677,11 +1700,10 @@ contains
                 QATM  = max(c0, SHUM(:,:,iblock)/rho_air) ! SHUM has small negative values
                 QSAT  = 0.98_r8 * 640380._r8 / exp(5107.4_r8/(SST(:,:,iblock)+T0_kelvin))
                 HQ    = min(hqmax, QATM/QSAT)
-                call comp_tritium_dep(iblock, LAND_MASK(:,:,iblock), data_ind(iblock), CPREC)
-                CPREC = 0.10995_r8 * CPREC  ! TU -> pmol/m^3
-                CVAP  = CPREC * 0.70_r8     ! pmol/m^3 (Cv = 0.7 * Cp)
-                ! CPREC = 0.10995_r8           ! pmol/m^3 (Cp = 1   TU)
-                ! CVAP  = 0.10995_r8 * 0.70_r8 ! pmol/m^3 (Cv = 0.7 TU)
+                call comp_tritium_dep(iblock, LAND_MASK(:,:,iblock), data_ind(iblock), CPREC, CRIVER)
+                CPREC  = 0.10995_r8 * CPREC  ! TU -> pmol/m^3
+                CRIVER = 0.10995_r8 * CRIVER ! TU -> pmol/m^3
+                CVAP   = CPREC * 0.70_r8     ! pmol/m^3 (Cv = 0.7 * Cp)
 
                 where (LAND_MASK(:,:,iblock))
                     SURF_VAL = max(c0, p5*(SURF_VALS_OLD(:,:,tr_ind,iblock) + &
@@ -1692,15 +1714,18 @@ contains
                     FLUX_EVAP_DOWN = -EVAP_F(:,:,iblock) * HQ / (c1 - HQ) * CVAP / rhofw                 ! downward vapor flux
                     FLUX_EVAP = FLUX_EVAP_UP + FLUX_EVAP_DOWN
                     FLUX_PREC = PREC_F(:,:,iblock) * CPREC / rhofw
-                    FLUX      = FLUX_PREC + FLUX_EVAP ! pmol/m^2/s
+                    FLUX_ROFF = ROFF_F(:,:,iblock) * CRIVER / rhofw
+                    FLUX      = FLUX_PREC + FLUX_EVAP + FLUX_ROFF   ! pmol/m^2/s
                     STF_MODULE(:,:,tr_ind,iblock) = FLUX * cm_per_m ! pmol/m^2/s -> pmol/m^3 * cm/s
                     ! store tavg
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_UP,iblock)   = FLUX_EVAP_UP
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP_DOWN,iblock) = FLUX_EVAP_DOWN
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_EVAP,iblock)      = FLUX_EVAP
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock)      = FLUX_PREC
+                    tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_ROFF,iblock)      = FLUX_ROFF
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock)           = FLUX
                     tr3he_SFLUX_TAVG(:,:,bufind_Tr_PREC,iblock)           = CPREC
+                    tr3he_SFLUX_TAVG(:,:,bufind_Tr_RIVER,iblock)          = CRIVER
                     tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock)                = HQ
                 elsewhere
                     STF_MODULE(:,:,tr_ind,iblock) = c0
@@ -2493,10 +2518,14 @@ contains
                     tavg_Tr_FLUX_EVAP_DOWN,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_PREC,iblock),           &
                     tavg_Tr_FLUX_PREC,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX_ROFF,iblock),           &
+                    tavg_Tr_FLUX_ROFF,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_FLUX,iblock),                &
                     tavg_Tr_FLUX,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_PREC,iblock),                &
                     tavg_Tr_PREC,iblock,1)
+            call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_Tr_RIVER,iblock),               &
+                    tavg_Tr_RIVER,iblock,1)
             call accumulate_tavg_field(tr3he_SFLUX_TAVG(:,:,bufind_HQ,iblock),                     &
                     tavg_HQ,iblock,1)
         end do
@@ -2532,38 +2561,64 @@ contains
         if (my_task == master_task) then
 
             nu = 99
-            write(stdout,*) 'Reading ', trim(tritium_dep_file)
-            open(nu, file=trim(tritium_dep_file), access='sequential', &
+!            write(stdout,*) 'Reading ', trim(tritium_dep_file_ocn)
+            call document(sub_name, 'tritium_dep_file_ocn', trim(tritium_dep_file_ocn))
+            open(nu, file=trim(tritium_dep_file_ocn), access='sequential', &
                     form="formatted", iostat=ios)
             if (ios /= 0) then
-                write(stdout,*) 'error from : read_tritium_dep_data'
+!                write(stdout,*) 'error from : read_tritium_dep_data'
+                call document(sub_name, 'error reading tritium_dep_file_ocn')
                 call exit_POP(sigAbort, 'stopping in ' /&
                         &/ sub_name)
             endif
-
             read(nu,'(a)') header
-            read(nu,*) label, gnip_lat(:)
+            read(nu,*) label, gnip_lat_ocn(:)
             read(nu,'(a)') header
             do ix = 1, gnptime
-                read(nu,*) gnip_date(ix), gnip_tritium(:,ix)
+                read(nu,*) gnip_date(ix), gnip_tritium_ocn(:,ix)
             end do
             close(nu)
+
+            nu = 77
+            call document(sub_name, 'tritium_dep_file_lnd', trim(tritium_dep_file_lnd))
+            open(nu, file=trim(tritium_dep_file_lnd), access='sequential', &
+                    form="formatted", iostat=ios)
+            if (ios /= 0) then
+!                write(stdout,*) 'error from : read_tritium_dep_data'
+                call document(sub_name, 'error reading tritium_dep_file_lnd')
+                call exit_POP(sigAbort, 'stopping in ' /&
+                        &/ sub_name)
+            endif
+            read(nu,'(a)') header
+            read(nu,*) label, gnip_lat_lnd(:)
+            read(nu,'(a)') header
+            do ix = 1, gnptime
+                read(nu,*) gnip_date(ix), gnip_tritium_lnd(:,ix)
+            end do
+            close(nu)
+
             gnip_data_len = size(gnip_date)
 
             call document(sub_name, 'gnip_data_len', gnip_data_len)
-            call document(sub_name, 'gnip_lat(1)', gnip_lat(1))
-            call document(sub_name, 'gnip_lat(end)', gnip_lat(gnplat))
             call document(sub_name, 'gnip_date(1)', gnip_date(1))
             call document(sub_name, 'gnip_date(end)', gnip_date(gnip_data_len))
-            call document(sub_name, 'gnip_tritium(1,1)', gnip_tritium(1,1))
-            call document(sub_name, 'gnip_tritium(end,end)', gnip_tritium(gnplat,gnip_data_len))
+            call document(sub_name, 'gnip_lat_ocn(1)', gnip_lat_ocn(1))
+            call document(sub_name, 'gnip_lat_ocn(end)', gnip_lat_ocn(gnplat_ocn))
+            call document(sub_name, 'gnip_tritium_ocn(1,1)', gnip_tritium_ocn(1,1))
+            call document(sub_name, 'gnip_tritium_ocn(end,end)', gnip_tritium_ocn(gnplat_ocn,gnip_data_len))
+            call document(sub_name, 'gnip_lat_lnd(1)', gnip_lat_lnd(1))
+            call document(sub_name, 'gnip_lat_lnd(end)', gnip_lat_lnd(gnplat_lnd))
+            call document(sub_name, 'gnip_tritium_lnd(1,1)', gnip_tritium_lnd(1,1))
+            call document(sub_name, 'gnip_tritium_lnd(end,end)', gnip_tritium_lnd(gnplat_lnd,gnip_data_len))
 
         endif ! my_task == master_task
 
         call broadcast_scalar(gnip_data_len, master_task)
-        call broadcast_array(gnip_lat, master_task)
+        call broadcast_array(gnip_lat_ocn, master_task)
+        call broadcast_array(gnip_lat_lnd, master_task)
         call broadcast_array(gnip_date, master_task)
-        call broadcast_array(gnip_tritium, master_task)
+        call broadcast_array(gnip_tritium_ocn, master_task)
+        call broadcast_array(gnip_tritium_lnd, master_task)
 
         !-----------------------------------------------------------------------
 
@@ -2574,7 +2629,7 @@ contains
     ! !IROUTINE: comp_pcfc
     ! !INTERFACE:
 
-    subroutine comp_tritium_dep(iblock, LAND_MASK, data_ind, tritium_dep)
+    subroutine comp_tritium_dep(iblock, LAND_MASK, data_ind, c_prec, c_river)
 
         ! !DESCRIPTION:
         ! Compute tritium concentration in precipitation according to latitude and date
@@ -2599,16 +2654,18 @@ contains
         !-----------------------------------------------------------------------
 
         integer (int_kind) :: &
+                data_ind_m5y, &
                 data_ind ! data_ind is the index into data for current timestep,
-                         ! i.e data_ind is largest integer less than pcfc_data_len s.t.
-                         !  pcfc_date(i) <= iyear + (iday_of_year-1+frac_day)/days_in_year
+                         ! i.e data_ind is largest integer less than gnip_data_len s.t.
+                         !  gnip_date(i) <= iyear + (iday_of_year-1+frac_day)/days_in_year
                          !                  - model_year + data_year
-                         !  note that data_ind is always strictly less than pcfc_data_len
+                         !  note that data_ind is always strictly less than gnip_data_len
                          !  and is initialized to -1 before the first call
 
         ! !OUTPUT PARAMETERS:
         real (r8), dimension(nx_block,ny_block), intent(out) :: &
-                tritium_dep ! tritium concentration in precipitation (TU)
+                c_prec, & ! tritium concentration in precipitation (TU)
+                c_river   ! tritium concentration in rivers (TU)
 
         !EOP
         !BOC
@@ -2620,11 +2677,20 @@ contains
                 i, j              ! loop indices
 
         real (r8) :: &
-                mapped_date,    & ! date of current model timestep mapped to data timeline
-                weight            ! weighting for temporal interpolation
+                mapped_date,     & ! date of current model timestep mapped to data timeline
+                mapped_date_m5y, & ! date of current model timestep minus 5 years mapped to data timeline
+                weight             ! weighting for temporal interpolation
 
-        real (r8), dimension(gnplat) :: &
-                gnip_tritium_curr ! atm tritium concentration for current time step
+        real (r8), dimension(gnplat_ocn) :: &
+                gnip_tritium_curr_ocn ! atm tritium concentration over ocean for current time step
+
+        real (r8), dimension(gnplat_lnd) :: &
+                gnip_tritium_curr_lnd,      & ! atm tritium concentration over land for current time step
+                gnip_tritium_curr_lnd_m5y     ! atm tritium concentration over land for current time step minus 5 years
+
+        real (r8), dimension(nx_block,ny_block) :: &
+                work1, &
+                work2
 
         !-----------------------------------------------------------------------
         !  Generate mapped_date and check to see if it is too large.
@@ -2635,17 +2701,25 @@ contains
         mapped_date = iyear + (iday_of_year-1+frac_day)/days_in_year &
                 - tr_model_year + tr_data_year
 
+        mapped_date_m5y = mapped_date - c5
+
         ! if (mapped_date >= gnip_date(gnip_data_len) + max_gnip_extension) &
-        !         print *, 'exit_POP(sigAbort, model date maps too far beyond pcfc_date(end))'
+        !         print *, 'exit_POP(sigAbort, model date maps too far beyond gnip_date(end))'
 
         !-----------------------------------------------------------------------
         ! Set tritium concentrations before GNIP record
         !-----------------------------------------------------------------------
 
         if (mapped_date < gnip_date(1)) then
-            gnip_tritium_curr = gnip_tritium(:,1)
+            gnip_tritium_curr_ocn = gnip_tritium_ocn(:,1)
+            gnip_tritium_curr_lnd = gnip_tritium_lnd(:,1)
             data_ind = 1
             ! return
+        endif
+
+        if (mapped_date_m5y < gnip_date(1)) then
+            gnip_tritium_curr_lnd_m5y = gnip_tritium_lnd(:,1)
+            data_ind_m5y = 1
         endif
 
         !-----------------------------------------------------------------------
@@ -2655,6 +2729,12 @@ contains
         if (data_ind == -1) then
             do data_ind = gnip_data_len-1,1,-1
                 if (mapped_date >= gnip_date(data_ind)) exit
+            end do
+        endif
+
+        if (data_ind_m5y == -1) then
+            do data_ind_m5y = gnip_data_len-1,1,-1
+                if (mapped_date_m5y >= gnip_date(data_ind_m5y)) exit
             end do
         endif
 
@@ -2669,25 +2749,52 @@ contains
             end do
         endif
 
+        if (data_ind_m5y < gnip_data_len) then
+            do data_ind_m5y = gnip_data_len,1,-1
+                if (mapped_date_m5y >= gnip_date(data_ind_m5y)) exit
+            end do
+        endif
+
         !-----------------------------------------------------------------------
         !  Generate tritium concentrations for current time step.
         !-----------------------------------------------------------------------
-        
+
         if (lflux_bomb) then
+
             if (data_ind < gnip_data_len) then
                 weight = (mapped_date - gnip_date(data_ind)) &
                         / (gnip_date(data_ind+1) - gnip_date(data_ind))
-
-                gnip_tritium_curr = &
-                        weight * gnip_tritium(:,data_ind+1) + (c1-weight) * gnip_tritium(:,data_ind)
+                gnip_tritium_curr_ocn = &
+                        weight * gnip_tritium_ocn(:,data_ind+1) + (c1-weight) * gnip_tritium_ocn(:,data_ind)
+                gnip_tritium_curr_lnd = &
+                        weight * gnip_tritium_lnd(:,data_ind+1) + (c1-weight) * gnip_tritium_lnd(:,data_ind)
             else
-                gnip_tritium_curr = gnip_tritium(:,gnip_data_len)
+                gnip_tritium_curr_ocn = gnip_tritium_ocn(:,gnip_data_len)
+                gnip_tritium_curr_lnd = gnip_tritium_lnd(:,gnip_data_len)
             endif
+
+            if (data_ind_m5y < gnip_data_len) then
+                weight = (mapped_date_m5y - gnip_date(data_ind_m5y)) &
+                        / (gnip_date(data_ind_m5y+1) - gnip_date(data_ind_m5y))
+                gnip_tritium_curr_lnd_m5y = &
+                        weight * gnip_tritium_lnd(:,data_ind_m5y+1) + (c1-weight) * gnip_tritium_lnd(:,data_ind_m5y)
+            else
+                gnip_tritium_curr_lnd_m5y = gnip_tritium_lnd(:,gnip_data_len)
+            endif
+
         endif
 
-        do i=1, gnplat
-            where (TLATD(:,:,iblock) > gnip_lat(i) .and. LAND_MASK) tritium_dep = gnip_tritium_curr(i)
+        do i=1, gnplat_ocn
+            where (TLATD(:,:,iblock) > gnip_lat_ocn(i) .and. LAND_MASK) c_prec = gnip_tritium_curr_ocn(i)
         enddo
+
+        do i=1, gnplat_lnd
+!            where (TLATD(:,:,iblock) > gnip_lat_lnd(i) .and. LAND_MASK) c_river = gnip_tritium_curr_lnd(i)
+            where (TLATD(:,:,iblock) > gnip_lat_lnd(i)) work1 = gnip_tritium_curr_lnd(i)
+            where (TLATD(:,:,iblock) > gnip_lat_lnd(i)) work2 = gnip_tritium_curr_lnd_m5y(i)
+        enddo
+
+        c_river = 0.25_r8 * work1 + 0.35_r8 * work2 ! Weiss & Roether, 1975 river model
 
         !-----------------------------------------------------------------------
         !EOC

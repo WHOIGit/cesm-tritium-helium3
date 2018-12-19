@@ -27,7 +27,7 @@ module passive_tracers
     use broadcast, only: broadcast_scalar
     use prognostic, only: TRACER, PSURF, RHO, tracer_d, oldtime, curtime, newtime
     use forcing_shf , only: SHF_QSW_RAW, SHF_QSW
-    use forcing_fields, only: EVAP_F, PREC_F, SHUM
+    use forcing_fields, only: EVAP_F, PREC_F, ROFF_F, SHUM
     use io_types, only: stdout, nml_in, nml_filename, io_field_desc, &
             datafile
     use exit_mod, only: sigAbort, exit_pop
@@ -963,7 +963,7 @@ contains
         !-----------------------------------------------------------------------
 
         if (tr3he_on) then
-            call tr3he_set_sflux(SHUM, EVAP_F, PREC_F,                     &
+            call tr3he_set_sflux(SHUM, EVAP_F, PREC_F, ROFF_F,             &
                     U10_SQR, ICE_FRAC, PRESS,                              &
                     SST_FILT, SSS_FILT, RHO_FILT,                          &
                     TRACER(:,:,1,tr3he_ind_begin:tr3he_ind_end,oldtime,:), &
