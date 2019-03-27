@@ -6042,7 +6042,7 @@ group="tr3he_nml"
 input_pathname="abs" >
 File name for atm tritium over ocean.
 
-Default: 'tritium_dep_gnip.txt '
+Default: 'tritium_dep_gnip_ocn.txt '
 </entry>
 
 <entry

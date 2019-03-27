@@ -132,9 +132,9 @@ module tr3he_mod
             tr_data_year,  & ! year in data that corresponds to model_year
             gnip_data_len    ! length of atmospheric tritium precipitation record
 
-    integer, parameter ::     & ! dimensions of GNIP tritium concentration data
-            gnplat_ocn  = 17, &
-            gnplat_lnd  = 9,  &
+    integer, parameter ::      & ! dimensions of GNIP tritium concentration data
+            gnplat_ocn  = 170, &
+            gnplat_lnd  = 85,  &
             gnptime     = 733
 
     real (r8), dimension(gnplat_ocn)         :: gnip_lat_ocn     ! lower bound of latitude bins (ocean)
