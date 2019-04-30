@@ -1293,7 +1293,8 @@ contains
                 phi        = 1.0_r8,              &
                 ha         = 0.13_r8,             &
                 hw         = 13.3_r8 / (A * phi), &
-                hqmax      = 0.95_r8                ! max relative humidity
+                hqmax      = 0.95_r8,             &  ! max relative humidity
+                cfac       = 4.74_r8                 ! scaling factor for vapor fluxes
 
         !-----------------------------------------------------------------------
 
@@ -1710,8 +1711,8 @@ contains
                             SURF_VALS_CUR(:,:,tr_ind,iblock))) ! pmol/m^3
                     ! NOTE: sign in FLUX_EVAP is opposite of Doney et al. 1993 because E = Vdown - Vup in CESM
                     ! FLUX_EVAP = EVAP_F(:,:,iblock) * (c1/(1.12_r8 * (c1 - HQ)) * SURF_VAL - HQ / (c1 - HQ) * CVAP) / rhofw
-                    FLUX_EVAP_UP   = EVAP_F(:,:,iblock) * c1 / (1.12_r8 * (c1 - HQ)) * SURF_VAL / rhofw  ! upward vapor flux
-                    FLUX_EVAP_DOWN = -EVAP_F(:,:,iblock) * HQ / (c1 - HQ) * CVAP / rhofw                 ! downward vapor flux
+                    FLUX_EVAP_UP   = EVAP_F(:,:,iblock) * c1 / (1.12_r8 * (c1 - HQ)) * SURF_VAL / rhofw * cfac ! upward vapor flux
+                    FLUX_EVAP_DOWN = -EVAP_F(:,:,iblock) * HQ / (c1 - HQ) * CVAP / rhofw * cfac                ! downward vapor flux
                     FLUX_EVAP = FLUX_EVAP_UP + FLUX_EVAP_DOWN
                     FLUX_PREC = PREC_F(:,:,iblock) * CPREC / rhofw
                     FLUX_ROFF = ROFF_F(:,:,iblock) * CRIVER / rhofw
